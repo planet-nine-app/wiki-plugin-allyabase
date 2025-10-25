@@ -1,0 +1,19 @@
+FROM node:18
+
+# Set working directory
+WORKDIR /app
+
+# Install wiki globally
+RUN npm install -g wiki
+
+# Install wiki-security-sessionless plugin
+RUN npm install -g wiki-security-sessionless
+
+# Create .wiki directory for data persistence
+RUN mkdir -p /root/.wiki
+
+# Expose the port (will be overridden by docker-compose)
+EXPOSE 3000
+
+# Default command (will be overridden by docker-compose)
+CMD ["wiki", "--security_type", "sessionless"]

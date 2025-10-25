@@ -1,0 +1,11 @@
+{
+  "name": "wiki-signin-server",
+  "version": "1.0.0",
+  "description": "Simple signin server for wiki test environment",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "author": "",
+  "license": "MIT"
+}

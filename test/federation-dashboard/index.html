@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Federation Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🌐 Federation Dashboard</h1>
+      <p class="subtitle">Federated Emojishortcode Network Monitor</p>
+    </header>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value" id="wiki-count">0</div>
+        <div class="stat-label">Active Wikis</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="location-count">0</div>
+        <div class="stat-label">Registered Locations</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="resolution-count">0</div>
+        <div class="stat-label">Resolutions Tested</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="success-rate">0%</div>
+        <div class="stat-label">Success Rate</div>
+      </div>
+    </div>
+
+    <div class="main-content">
+      <!-- Federation Network Visualization -->
+      <section class="panel">
+        <h2>🕸️ Federation Network</h2>
+        <div id="network-graph"></div>
+      </section>
+
+      <!-- Registered Locations -->
+      <section class="panel">
+        <h2>📍 Registered Locations</h2>
+        <div class="toolbar">
+          <button id="refresh-locations" class="btn btn-primary">
+            🔄 Refresh
+          </button>
+          <button id="test-all" class="btn btn-secondary">
+            🧪 Test All
+          </button>
+        </div>
+        <div id="locations-table"></div>
+      </section>
+
+      <!-- Shortcode Resolver -->
+      <section class="panel">
+        <h2>🔍 Shortcode Resolver</h2>
+        <div class="resolver-form">
+          <div class="form-group">
+            <label for="shortcode-input">Federated Shortcode:</label>
+            <input
+              type="text"
+              id="shortcode-input"
+              placeholder="💚☮️🏴‍☠️👽/resource/path"
+              class="input-large">
+          </div>
+          <div class="form-group">
+            <label for="wiki-select">Test from Wiki:</label>
+            <select id="wiki-select" class="select"></select>
+          </div>
+          <button id="resolve-btn" class="btn btn-primary btn-large">
+            Resolve Shortcode
+          </button>
+        </div>
+        <div id="resolution-result"></div>
+      </section>
+
+      <!-- Live Activity Log -->
+      <section class="panel">
+        <h2>📜 Activity Log</h2>
+        <div class="toolbar">
+          <button id="clear-log" class="btn btn-secondary">
+            Clear Log
+          </button>
+        </div>
+        <div id="activity-log"></div>
+      </section>
+
+      <!-- Federation Health -->
+      <section class="panel">
+        <h2>💚 Federation Health</h2>
+        <div id="health-status"></div>
+      </section>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+{
+  "name": "wiki-plugin-allyabase",
+  "version": "0.0.1",
+  "description": "Allyabase management plugin for the federated wiki",
+  "keywords": [
+    "wiki",
+    "federated",
+    "allyabase",
+    "planet-nine"
+  ],
+  "homepage": "https://github.com/planet-nine-app/wiki-plugin-allyabase#readme",
+  "bugs": {
+    "url": "https://github.com/planet-nine-app/wiki-plugin-allyabase/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/planet-nine-app/wiki-plugin-allyabase.git"
+  },
+  "license": "MIT",
+  "author": "planetnineisaspaceship",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "http-proxy": "^1.18.1"
+  }
+}

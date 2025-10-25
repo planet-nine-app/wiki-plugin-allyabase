@@ -1,0 +1,154 @@
+async function post(url, payload = {}) {
+  return await fetch(url, {
+    method: 'post',
+    body: JSON.stringify(payload),
+    headers: {'Content-Type': 'application/json'}
+  });
+}
+
+async function get(url) {
+  return await fetch(url, {
+    method: 'get',
+    headers: {'Content-Type': 'application/json'}
+  });
+}
+
+function formatServiceStatus(service, details) {
+  const emoji = details.status === 'running' ? '✅' : '❌';
+  const portInfo = `port ${details.port}`;
+  return `${emoji} ${service}: ${details.status} (${portInfo})`;
+}
+
+function emit($item, item) {
+  $item.empty();
+
+  // Create main container
+  const container = document.createElement('div');
+  container.style.padding = '10px';
+
+  // Add title
+  const title = document.createElement('h3');
+  title.textContent = 'Allyabase Management';
+  container.appendChild(title);
+
+  // Add launch button
+  const launchButton = document.createElement('button');
+  launchButton.textContent = 'Launch a Base';
+  launchButton.style.padding = '10px 20px';
+  launchButton.style.marginBottom = '15px';
+  launchButton.style.cursor = 'pointer';
+  container.appendChild(launchButton);
+
+  // Add status container
+  const statusContainer = document.createElement('div');
+  statusContainer.id = 'allyabase-status';
+  statusContainer.style.marginTop = '15px';
+  container.appendChild(statusContainer);
+
+  $item.append(container);
+
+  // Function to update status display
+  async function updateStatus() {
+    try {
+      const response = await get('/plugin/allyabase/healthcheck');
+      const health = await response.json();
+
+      statusContainer.innerHTML = '';
+
+      // Add summary
+      const summary = document.createElement('div');
+      summary.style.marginBottom = '10px';
+      summary.style.fontWeight = 'bold';
+      summary.innerHTML = `<p>Services Running: ${health.runningServices} / ${health.totalServices}</p>`;
+      statusContainer.appendChild(summary);
+
+      // Add individual service statuses
+      const serviceList = document.createElement('div');
+      serviceList.style.fontFamily = 'monospace';
+      serviceList.style.fontSize = '12px';
+
+      for (const [service, details] of Object.entries(health.services)) {
+        const serviceDiv = document.createElement('div');
+        serviceDiv.textContent = formatServiceStatus(service, details);
+        serviceDiv.style.padding = '2px 0';
+        serviceList.appendChild(serviceDiv);
+      }
+      statusContainer.appendChild(serviceList);
+
+      // Add timestamp
+      const timestamp = document.createElement('div');
+      timestamp.style.marginTop = '10px';
+      timestamp.style.fontSize = '11px';
+      timestamp.style.color = '#666';
+      timestamp.textContent = `Last checked: ${new Date(health.timestamp).toLocaleString()}`;
+      statusContainer.appendChild(timestamp);
+
+    } catch (err) {
+      statusContainer.innerHTML = `<p style="color: red;">Error fetching status: ${err.message}</p>`;
+      console.error('Error fetching allyabase status:', err);
+    }
+  }
+
+  // Launch button click handler
+  launchButton.addEventListener('click', async () => {
+    launchButton.disabled = true;
+    launchButton.textContent = 'Launching...';
+
+    try {
+      const response = await post('/plugin/allyabase/launch');
+      const result = await response.json();
+
+      if (result.success) {
+        const successMsg = document.createElement('div');
+        successMsg.style.color = 'green';
+        successMsg.style.marginTop = '10px';
+        successMsg.textContent = `✓ ${result.message}`;
+        container.insertBefore(successMsg, statusContainer);
+
+        // Wait a bit for services to start, then check status
+        setTimeout(() => {
+          successMsg.remove();
+          updateStatus();
+        }, 3000);
+      } else {
+        const errorMsg = document.createElement('div');
+        errorMsg.style.color = 'red';
+        errorMsg.style.marginTop = '10px';
+        errorMsg.textContent = `✗ Launch failed: ${result.error}`;
+        container.insertBefore(errorMsg, statusContainer);
+      }
+    } catch (err) {
+      const errorMsg = document.createElement('div');
+      errorMsg.style.color = 'red';
+      errorMsg.style.marginTop = '10px';
+      errorMsg.textContent = `✗ Error launching base: ${err.message}`;
+      container.insertBefore(errorMsg, statusContainer);
+      console.error('Error launching allyabase:', err);
+    } finally {
+      launchButton.disabled = false;
+      launchButton.textContent = 'Launch a Base';
+    }
+  });
+
+  // Initial status check
+  updateStatus();
+
+  // Auto-refresh status every 30 seconds
+  const refreshInterval = setInterval(updateStatus, 30000);
+
+  // Store interval ID so it can be cleared if needed
+  item._statusRefreshInterval = refreshInterval;
+}
+
+function bind($item, item) {
+  // Clean up interval when item is removed/rebound
+  if (item._statusRefreshInterval) {
+    clearInterval(item._statusRefreshInterval);
+  }
+}
+
+if (window) {
+  window.plugins['allyabase'] = { emit, bind };
+}
+
+export const allyabase = typeof window == 'undefined' ? { emit, bind } : undefined;

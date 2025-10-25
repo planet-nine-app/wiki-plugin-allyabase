@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  wiki1:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile
+    container_name: fedwiki-test-1
+    ports:
+      - "7070:3000"
+    environment:
+      - PORT=3000
+      - SECURITY_TYPE=sessionless
+    volumes:
+      - wiki1-data:/root/.wiki
+      - ./wiki-configs/wiki1/status/owner.json:/root/.wiki/status/owner.json
+    command: wiki --port 3000 --security_type sessionless
+    networks:
+      - fedwiki-network
+
+  wiki2:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile
+    container_name: fedwiki-test-2
+    ports:
+      - "7071:3000"
+    environment:
+      - PORT=3000
+      - SECURITY_TYPE=sessionless
+    volumes:
+      - wiki2-data:/root/.wiki
+      - ./wiki-configs/wiki2/status/owner.json:/root/.wiki/status/owner.json
+    command: wiki --port 3000 --security_type sessionless
+    networks:
+      - fedwiki-network
+
+  wiki3:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile
+    container_name: fedwiki-test-3
+    ports:
+      - "7072:3000"
+    environment:
+      - PORT=3000
+      - SECURITY_TYPE=sessionless
+    volumes:
+      - wiki3-data:/root/.wiki
+      - ./wiki-configs/wiki3/status/owner.json:/root/.wiki/status/owner.json
+    command: wiki --port 3000 --security_type sessionless
+    networks:
+      - fedwiki-network
+
+  wiki4:
+    build:
+      context: .
+      dockerfile: Dockerfile.plain
+    container_name: fedwiki-test-4
+    ports:
+      - "7073:3000"
+    environment:
+      - PORT=3000
+      - SECURITY_TYPE=sessionless
+    volumes:
+      - wiki4-data:/root/.wiki
+      - ./wiki-configs/wiki4/status/owner.json:/root/.wiki/status/owner.json
+    command: wiki --port 3000 --security_type sessionless
+    networks:
+      - fedwiki-network
+
+  wiki5:
+    build:
+      context: .
+      dockerfile: Dockerfile.plain
+    container_name: fedwiki-test-5
+    ports:
+      - "7074:3000"
+    environment:
+      - PORT=3000
+      - SECURITY_TYPE=sessionless
+    volumes:
+      - wiki5-data:/root/.wiki
+      - ./wiki-configs/wiki5/status/owner.json:/root/.wiki/status/owner.json
+    command: wiki --port 3000 --security_type sessionless
+    networks:
+      - fedwiki-network
+
+volumes:
+  wiki1-data:
+  wiki2-data:
+  wiki3-data:
+  wiki4-data:
+  wiki5-data:
+
+networks:
+  fedwiki-network:
+    driver: bridge

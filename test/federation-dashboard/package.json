@@ -1,0 +1,11 @@
+{
+  "name": "federation-dashboard",
+  "version": "1.0.0",
+  "description": "Federation dashboard for wiki-plugin-allyabase",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "author": "",
+  "license": "MIT"
+}
