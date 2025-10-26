@@ -33,9 +33,6 @@ setup_services() {
         npm install "$service/src/server/node"
     done
 
-    printf '%s\n' "Installing wiki"
-    git clone "https://github.com/fedwiki/wiki"
-    printf '%s\n' "Wiki installed"
 } # setup_services
 
 setup_ecosystem() {
@@ -52,16 +49,39 @@ setup_ecosystem() {
         'module.exports = {' \
         '  apps: [' >>"$ecosystem_config"
 
+    # Port mapping for each service
+    declare -A service_ports=(
+        [julia]=3001
+        [continuebee]=2999
+        [fount]=3002
+        [bdo]=3003
+        [joan]=3004
+        [addie]=3005
+        [pref]=3006
+        [dolores]=3007
+        [prof]=3008
+        [covenant]=3011
+        [minnie]=2525
+        [aretha]=7277
+        [sanora]=7243
+    )
+
     for service in "${services[@]}"; do
+        port="${service_ports[$service]}"
+
         if [[ $service == 'addie' ]]; then
             env="{
                 LOCALHOST: 'true',
+                PORT: '$port',
                 STRIPE_KEY: '<api key here>',
                 STRIPE_PUBLISHING_KEY: '<publishing key here>',
                 SQUARE_KEY: '<api key here>'
             }"
         else
-            env="{ LOCALHOST: 'true' }"
+            env="{
+                LOCALHOST: 'true',
+                PORT: '$port'
+            }"
         fi
 
         printf '%s\n' \

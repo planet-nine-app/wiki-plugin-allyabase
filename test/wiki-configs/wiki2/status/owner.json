@@ -1,7 +1,8 @@
 {
   "name": "wiki2-testuser",
   "sessionlessKeys": {
-    "pubKey": "020ac2680d4f9cd5b3ca8920d92d521203770a53ee03e7fe081e043c1e698999ef"
+    "pubKey": "020ac2680d4f9cd5b3ca8920d92d521203770a53ee03e7fe081e043c1e698999ef",
+    "privateKey": "b4932179e9612962ee9d1995ed579f69bd8051d1cb805f934a706d82b48a42bc"
   },
   "pubKey": "020ac2680d4f9cd5b3ca8920d92d521203770a53ee03e7fe081e043c1e698999ef"
 }

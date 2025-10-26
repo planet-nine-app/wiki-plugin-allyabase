@@ -3,11 +3,13 @@ const { exec } = require('child_process');
 const path = require('path');
 const http = require('http');
 const httpProxy = require('http-proxy');
+const fs = require('fs');
 const federationResolver = require('./federation-resolver');
+const BDO = require('bdo-js');
 
 // Expected ports for all services based on allyabase_setup.sh
 const SERVICE_PORTS = {
-  julia: 3000,
+  julia: 3001,        // Changed from 3000 to avoid conflict with wiki server
   continuebee: 2999,
   fount: 3002,
   bdo: 3003,
@@ -19,8 +21,7 @@ const SERVICE_PORTS = {
   covenant: 3011,
   minnie: 2525,
   aretha: 7277,
-  sanora: 7243,
-  wiki: 3333
+  sanora: 7243
 };
 
 let baseStatus = {
@@ -28,6 +29,27 @@ let baseStatus = {
   services: {},
   lastLaunch: null
 };
+
+// Function to load wiki's owner.json for keypair
+function loadWikiKeypair() {
+  try {
+    const ownerPath = path.join(process.env.HOME || '/root', '.wiki/status/owner.json');
+    if (fs.existsSync(ownerPath)) {
+      const ownerData = JSON.parse(fs.readFileSync(ownerPath, 'utf8'));
+      if (ownerData.sessionlessKeys) {
+        return {
+          pubKey: ownerData.sessionlessKeys.pubKey,
+          privateKey: ownerData.sessionlessKeys.privateKey
+        };
+      }
+    }
+    console.warn('[wiki-plugin-allyabase] No owner.json or sessionlessKeys found');
+    return null;
+  } catch (err) {
+    console.error('[wiki-plugin-allyabase] Error loading wiki keypair:', err);
+    return null;
+  }
+}
 
 // Function to check if a port is responding
 function checkPort(port) {
@@ -320,6 +342,97 @@ async function startServer(params) {
       res.status(500).send({
         success: false,
         error: err.message
+      });
+    }
+  });
+
+  // Fetch a federated BDO via emojicode using authenticated bdo-js request
+  app.post('/plugin/allyabase/federation/fetch-bdo', async function(req, res) {
+    try {
+      const { emojicode, currentWikiUrl } = req.body;
+
+      if (!emojicode) {
+        return res.status(400).send({
+          success: false,
+          error: 'Missing emojicode'
+        });
+      }
+
+      console.log('[federation/fetch-bdo] Fetching BDO:', emojicode);
+
+      // Parse the emojicode to extract UUID
+      // Expected format: 💚{emoji-location}/bdo/{uuid}
+      const parsed = federationResolver.parseFederatedShortcode(emojicode);
+      if (!parsed) {
+        return res.status(400).send({
+          success: false,
+          error: 'Invalid emojicode format'
+        });
+      }
+
+      // Extract UUID from resource path (e.g., /bdo/123 -> 123)
+      const uuidMatch = parsed.resourcePath.match(/\/bdo\/([a-f0-9-]+)/);
+      if (!uuidMatch) {
+        return res.status(400).send({
+          success: false,
+          error: 'Invalid BDO path format. Expected /bdo/{uuid}'
+        });
+      }
+      const uuid = uuidMatch[1];
+
+      console.log('[federation/fetch-bdo] Extracted UUID:', uuid);
+
+      // Resolve location emoji to URL
+      const wikiUrl = currentWikiUrl || `http://localhost:${req.socket.localPort}`;
+      const baseTargetUrl = await federationResolver.resolveFederatedShortcode(
+        `💚${parsed.locationIdentifier}/`,
+        wikiUrl
+      );
+
+      // Remove trailing slash
+      const targetWikiUrl = baseTargetUrl.replace(/\/$/, '');
+      console.log('[federation/fetch-bdo] Target wiki:', targetWikiUrl);
+
+      // Load this wiki's keypair
+      const keypair = loadWikiKeypair();
+      if (!keypair) {
+        return res.status(500).send({
+          success: false,
+          error: 'Wiki keypair not found. Cannot authenticate request.'
+        });
+      }
+
+      // Initialize BDO - it's not a constructor, it's an object with methods
+      // We need to use bdo-js methods directly
+
+      // Make authenticated request to target wiki's BDO service
+      // The target wiki has BDO service at /plugin/allyabase/bdo
+      const bdoServiceUrl = `${targetWikiUrl}/plugin/allyabase/bdo`;
+
+      console.log('[federation/fetch-bdo] Fetching from:', bdoServiceUrl);
+      console.log('[federation/fetch-bdo] UUID:', uuid);
+
+      // Use bdo.get to fetch the BDO with signed request
+      const bdoData = await bdo.get(uuid, bdoServiceUrl);
+
+      console.log('[federation/fetch-bdo] Successfully retrieved BDO');
+
+      // Return the BDO to the client
+      res.send({
+        success: true,
+        emojicode,
+        uuid,
+        targetWiki: targetWikiUrl,
+        sourceWiki: wikiUrl,
+        bdo: bdoData
+      });
+
+    } catch (err) {
+      console.error('[federation/fetch-bdo] Error:', err);
+      res.status(500).send({
+        success: false,
+        error: err.message,
+        details: err.stack
       });
     }
   });

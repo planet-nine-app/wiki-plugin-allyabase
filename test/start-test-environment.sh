@@ -144,6 +144,14 @@ if [ "$FEDERATE" = true ]; then
   ./create-allyabase-pages.sh
 
   echo ""
+  echo "📋 Creating roster pages for native federation..."
+  ./create-roster-pages.sh
+
+  echo ""
+  echo "👋 Creating welcome and join federation pages..."
+  ./create-welcome-pages.sh
+
+  echo ""
   echo "⏳ Waiting 5 seconds for plugins to load..."
   sleep 5
   echo ""
