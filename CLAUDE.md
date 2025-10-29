@@ -7,6 +7,7 @@ The `wiki-plugin-allyabase` is a Federated Wiki plugin that provides:
 1. **Allyabase Management**: Launch and manage the Allyabase ecosystem of microservices
 2. **Federation via Emojishortcodes**: A distributed location resolution system using emoji identifiers
 3. **Service Proxying**: Routes to all 14 Allyabase microservices through the wiki
+4. **Federated BDO Resolution**: Cross-wiki BDO (Basic Data Object) fetching with automatic routing
 
 ## Architecture
 
@@ -45,21 +46,21 @@ wiki-plugin-allyabase/
 **Federation Endpoints:**
 
 - `POST /plugin/allyabase/federation/register` - Register a location identifier
-  - Body: `{"locationIdentifier": "☮️🏴‍☠️👽", "url": "http://example.com"}`
+  - Body: `{"locationIdentifier": "☮️🌙🎸", "url": "http://example.com"}`
 
 - `GET /plugin/allyabase/federation/location/:identifier` - Get URL for a location
-  - Returns: `{"locationIdentifier": "☮️🏴‍☠️👽", "url": "http://example.com"}`
+  - Returns: `{"locationIdentifier": "☮️🌙🎸", "url": "http://example.com"}`
 
 - `GET /plugin/allyabase/federation/locations` - Get all registered locations
-  - Returns: `{"☮️🏴‍☠️👽": "http://example.com", ...}`
+  - Returns: `{"☮️🌙🎸": "http://example.com", ...}`
 
 - `POST /plugin/allyabase/federation/resolve` - Resolve a federated shortcode
-  - Body: `{"shortcode": "💚☮️🏴‍☠️👽/resource", "currentWikiUrl": "http://localhost:7070"}`
+  - Body: `{"shortcode": "💚☮️🌙🎸/resource", "currentWikiUrl": "http://localhost:7070"}`
   - Returns: `{"success": true, "resolvedUrl": "http://example.com/resource"}`
 
 - `POST /plugin/allyabase/federation/parse` - Parse shortcode without resolving
-  - Body: `{"shortcode": "💚☮️🏴‍☠️👽/test"}`
-  - Returns: `{"success": true, "federationPrefix": "💚", "locationIdentifier": "☮️🏴‍☠️👽", "resourcePath": "/test"}`
+  - Body: `{"shortcode": "💚☮️🌙🎸/test"}`
+  - Returns: `{"success": true, "federationPrefix": "💚", "locationIdentifier": "☮️🌙🎸", "resourcePath": "/test"}`
 
 **Service Proxies:**
 
@@ -80,20 +81,45 @@ All 14 microservices are proxied through the wiki:
 - `/plugin/allyabase/sanora/*` → `http://localhost:7243/*`
 - `/plugin/allyabase/wiki/*` → `http://localhost:3333/*`
 
+**BDO Emoji Endpoint:**
+
+- `GET /plugin/allyabase/bdo/emoji/:emojicode` - Fetch BDO by emojicode with federation support
+
+This endpoint implements federated BDO resolution:
+
+1. **Emoji Extraction**: Parses the 9-emoji emojicode format `💚[3-location][5-uuid]`
+2. **Location Resolution**: Looks up the 3-emoji location identifier in federation registry
+3. **Local Detection**: Compares location identifier with this wiki's locationEmoji from owner.json
+4. **Smart Routing**:
+   - If local: Fetches from local BDO service (http://localhost:3003)
+   - If remote: Forwards request to target wiki using registered URL
+5. **Response Proxy**: Returns BDO data transparently regardless of source
+
+**Key Implementation Details:**
+
+The local wiki detection uses emoji identifier comparison instead of URL comparison. This is critical for Docker environments where:
+- External requests use: `http://127.0.0.1:7070`
+- Federation registry uses: `http://host.docker.internal:7070`
+- Internal wiki sees: `http://localhost:4000`
+
+By comparing emoji identifiers (e.g., "☮️🌙🎸"), we can reliably detect when a BDO request is for the local wiki regardless of URL format.
+
+**Code Reference**: `/Users/zachbabb/Work/planet-nine/third-party/wiki-plugin-allyabase/server/server.js:234-340`
+
 #### Federation Resolver (`server/federation-resolver.js`)
 
 **Core Concepts:**
 
 1. **Federated Emojishortcodes**: A distributed naming system using emoji
    - Format: `💚[3-emoji-location][resource-path]`
-   - Example: `💚☮️🏴‍☠️👽/test` → `http://localhost:7070/test`
+   - Example: `💚☮️🌙🎸/test` → `http://localhost:7070/test`
 
 2. **Location Identifiers**: 3-emoji sequences that identify wiki locations
-   - `☮️🏴‍☠️👽` (Peace Pirate Alien)
-   - `🌈🦄✨` (Rainbow Unicorn Sparkle)
-   - `🔥💎🌟` (Fire Diamond Star)
-   - `🌊🐬🎨` (Ocean Dolphin Art)
-   - `🎭🎪🎡` (Theater Circus Ferris)
+   - `☮️🌙🎸` (Peace Moon Guitar) - Wiki 1
+   - `🌈🦄✨` (Rainbow Unicorn Sparkles) - Wiki 2
+   - `🔥💎🌟` (Fire Diamond Star) - Wiki 3
+   - `🌊🐬🎨` (Ocean Dolphin Art) - Wiki 4
+   - `🎭🎪🎡` (Theater Circus Ferris) - Wiki 5
 
 3. **Discovery Algorithm**: Breadth-first search through wiki neighborhood
    - Checks local cache first
@@ -145,9 +171,9 @@ Functions:
 The test environment creates 5 federated wikis:
 
 **With allyabase plugin (ports 7070-7072):**
-- Wiki 1: `☮️🏴‍☠️👽` (http://localhost:7070)
-- Wiki 2: `🌈🦄✨` (http://localhost:7071)
-- Wiki 3: `🔥💎🌟` (http://localhost:7072)
+- Wiki 1: `☮️🌙🎸` (http://localhost:7070) - Peace, Moon, Guitar
+- Wiki 2: `🌈🦄✨` (http://localhost:7071) - Rainbow, Unicorn, Sparkles
+- Wiki 3: `🔥💎🌟` (http://localhost:7072) - Fire, Diamond, Star
 
 **Plain wikis (ports 7073-7074):**
 - Wiki 4: `🌊🐬🎨` (http://localhost:7073)
@@ -178,6 +204,80 @@ Expected results:
 - Registrations: 15/15 (3 wikis × 5 locations)
 - Verifications: 15/15 (3 wikis × 5 locations)
 - Resolutions: 5/5 (all locations resolve correctly)
+
+### Federated BDO Testing
+
+The `test-federated-bdos.js` script tests cross-wiki BDO resolution across all wiki permutations.
+
+**Running the test:**
+
+```bash
+cd test
+
+# Start environment and launch allyabase services
+./start-test-environment.sh --clean
+./create-allyabase-pages.sh
+sleep 5
+
+# Launch allyabase on all wikis
+curl -X POST http://localhost:7070/plugin/allyabase/launch
+curl -X POST http://localhost:7071/plugin/allyabase/launch
+curl -X POST http://localhost:7072/plugin/allyabase/launch
+sleep 60
+
+# Run the federated BDO test
+node test-federated-bdos.js
+```
+
+**Test Phases:**
+
+1. **BDO Seeding** (3 BDOs created):
+   - Creates a test BDO on each wiki using bdo-js library
+   - Uses wiki's sessionless keys for authentication
+   - Makes each BDO public to get 9-emoji emojicode (💚 + 3 location + 5 UUID)
+   - Example: `💚☮️🌙🎸🔔🔫🕕🕓🚅`
+
+2. **Federation Registration** (9 registrations):
+   - Each of the 3 wikis registers all 3 locations
+   - Uses `host.docker.internal` URLs for Docker compatibility
+   - Example: `☮️🌙🎸 → http://host.docker.internal:7070`
+
+3. **Cross-Wiki Resolution Testing** (9 permutations):
+   - Tests every wiki fetching every other wiki's BDO
+   - Matrix: Wiki 1→1, Wiki 1→2, Wiki 1→3, Wiki 2→1, etc.
+   - Uses bdo-js `getBDOByEmojicode()` which calls the emoji endpoint
+   - Verifies BDO data is returned correctly
+
+**Expected Results:**
+
+```
+====================================
+📈 Test Results
+====================================
+
+Total tests: 9
+Successful: 9
+Failed: 0
+
+✅ All tests passed!
+
+🎉 Federated BDO resolution is working correctly!
+
+Matrix:
+       → Wiki 1  Wiki 2  Wiki 3
+Wiki 1    ✓       ✓       ✓
+Wiki 2    ✓       ✓       ✓
+Wiki 3    ✓       ✓       ✓
+```
+
+**What This Proves:**
+
+1. ✅ **Emoji Extraction**: All 9 emoji correctly extracted including federation prefix
+2. ✅ **Local Detection**: Wikis correctly identify their own BDOs vs. remote BDOs
+3. ✅ **Cross-Wiki Forwarding**: Remote BDO requests properly forwarded
+4. ✅ **Docker Networking**: host.docker.internal URLs work for inter-container communication
+5. ✅ **BDO Service Integration**: Wiki plugin correctly proxies to BDO microservice
+6. ✅ **Authentication**: Sessionless security keys properly used for BDO operations
 
 ### Key Implementation Details for Tests
 
@@ -282,6 +382,70 @@ Features:
 
 The regex must treat this as a single emoji, not split it apart.
 
+**Current Regex (server/server.js:241):**
+```javascript
+const emojiRegex = /[\u{1F1E6}-\u{1F1FF}]{2}|(?:[\u{1F3F4}\u{1F3F3}][\u{FE0F}]?(?:\u{200D}[\u{2620}\u{2695}\u{2696}\u{2708}\u{1F308}][\u{FE0F}]?)?)|(?:\p{Emoji_Presentation}|\p{Emoji})[\u{FE0F}\u{200D}]?(?:\u{200D}(?:\p{Emoji_Presentation}|\p{Emoji})[\u{FE0F}]?)*/gu;
+```
+
+This handles:
+- Regional indicators (flags)
+- ZWJ sequences
+- Variation selectors
+- Simple emoji without Emoji_Presentation property
+
+### Local Wiki Detection in Docker
+
+**Problem**: Wikis couldn't recognize their own BDOs because URLs differ:
+- External: `http://127.0.0.1:7070`
+- Federation registry: `http://host.docker.internal:7070`
+- Internal: `http://localhost:4000`
+
+**Solution**: Compare location emoji identifiers instead of URLs.
+
+**Implementation (server/server.js:294-316):**
+
+1. Load wiki's locationEmoji from owner.json:
+```javascript
+function loadWikiKeypair() {
+  const ownerData = JSON.parse(fs.readFileSync(ownerPath, 'utf8'));
+  return {
+    pubKey: ownerData.sessionlessKeys.pubKey,
+    privateKey: ownerData.sessionlessKeys.privateKey,
+    locationEmoji: ownerData.locationEmoji,      // Added!
+    federationEmoji: ownerData.federationEmoji   // Added!
+  };
+}
+```
+
+2. Compare extracted location identifier with this wiki's locationEmoji:
+```javascript
+const wikiInfo = loadWikiKeypair();
+const thisWikiLocationEmoji = wikiInfo ? wikiInfo.locationEmoji : null;
+
+const isLocalWiki = (targetWikiUrl === currentWikiUrl ||
+                    targetWikiUrl.includes(`localhost:${req.socket.localPort}`) ||
+                    (thisWikiLocationEmoji && locationIdentifier === thisWikiLocationEmoji));
+```
+
+3. Route accordingly:
+```javascript
+if (isLocalWiki) {
+  // Fetch from local BDO service
+  const localUrl = `http://localhost:3003/emoji/${encodeURIComponent(emojicode)}`;
+  const response = await fetch(localUrl);
+  return res.json(await response.json());
+} else {
+  // Forward to remote wiki
+  const forwardUrl = `${targetWikiUrl}/plugin/allyabase/bdo/emoji/${encodeURIComponent(emojicode)}`;
+  const response = await fetch(forwardUrl);
+  return res.json(await response.json());
+}
+```
+
+**Why This Works:**
+
+Location emoji identifiers are unique per wiki and stored in owner.json. By comparing the extracted locationIdentifier (e.g., "☮️🌙🎸") with thisWikiLocationEmoji, we reliably detect local requests regardless of URL format. This makes the system work seamlessly in Docker environments where the same wiki is accessible via multiple URLs.
+
 ### Health Check Failures
 
 **Problem**: Wikis appear to be running but health checks fail
@@ -320,6 +484,8 @@ fi
 
 ## Success Metrics
 
+### Federation Tests (setup-federation.sh)
+
 A fully working federation test should show:
 
 ```
@@ -337,11 +503,52 @@ Summary:
 🌐 Federation is working correctly!
 
 You can now use emojicodes like:
-  💚☮️🏴‍☠️👽/resource → http://localhost:7070/resource
+  💚☮️🌙🎸/resource → http://localhost:7070/resource
   💚🌈🦄✨/resource → http://localhost:7071/resource
   💚🔥💎🌟/resource → http://localhost:7072/resource
   💚🌊🐬🎨/resource → http://localhost:7073/resource
   💚🎭🎪🎡/resource → http://localhost:7074/resource
 ```
 
-This represents a fully functional federated wiki network with distributed emoji-based location resolution!
+This proves:
+- ✅ Location registration working
+- ✅ Federation discovery working
+- ✅ Shortcode resolution working
+
+### Federated BDO Tests (test-federated-bdos.js)
+
+A fully working federated BDO test should show:
+
+```
+====================================
+📈 Test Results
+====================================
+
+Total tests: 9
+Successful: 9
+Failed: 0
+
+✅ All tests passed!
+
+🎉 Federated BDO resolution is working correctly!
+
+Matrix:
+       → Wiki 1  Wiki 2  Wiki 3
+Wiki 1    ✓       ✓       ✓
+Wiki 2    ✓       ✓       ✓
+Wiki 3    ✓       ✓       ✓
+```
+
+This proves:
+- ✅ BDO creation with 9-emoji codes (💚 + 3 location + 5 UUID)
+- ✅ Emoji extraction handling all emoji types correctly
+- ✅ Local wiki detection via emoji identifier comparison
+- ✅ Cross-wiki BDO forwarding with host.docker.internal
+- ✅ BDO service integration and authentication
+- ✅ End-to-end federated data retrieval working
+
+**Combined Success**: Both tests passing represents a fully functional federated wiki network with:
+- Distributed emoji-based location resolution
+- Cross-wiki BDO (Basic Data Object) fetching
+- Docker-compatible networking
+- Sessionless security authentication

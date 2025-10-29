@@ -36,7 +36,7 @@ WORKDIR /app
 RUN mkdir -p /root/.wiki
 
 # Expose the port (will be overridden by docker-compose)
-EXPOSE 3000
+EXPOSE 4000
 
-# Default command (will be overridden by docker-compose)
-CMD ["wiki", "--security_type", "sessionless"]
+# Default command - run wiki on port 4000 to avoid conflict with allyabase julia service on 3000
+CMD ["wiki", "--port", "4000", "--security_type", "sessionless"]

@@ -11,6 +11,7 @@ This plugin provides a convenient interface for launching and monitoring your lo
 - **Auto-refresh**: Status updates every 30 seconds
 - **Service Details**: Shows port and HTTP status for each service
 - **Federated Emojishortcodes**: Decentralized resource discovery using emoji-based identifiers (see [FEDERATION.md](./FEDERATION.md))
+- **Federated BDO Resolution**: Cross-wiki BDO (Basic Data Object) fetching using emoji-based identifiers
 
 ## Services Monitored
 
@@ -70,6 +71,45 @@ All allyabase services are accessible via proxy routes:
 - `/plugin/allyabase/bdo/*` → bdo service
 - `/plugin/allyabase/fount/*` → fount service
 - (and so on for all 14 services)
+
+### Federated BDO Endpoints
+
+#### GET /plugin/allyabase/bdo/emoji/:emojicode
+
+Fetch a BDO by its emojicode, with automatic federation support.
+
+**Emojicode Format**: `💚[3-location-emoji][5-uuid-emoji]`
+
+Example: `💚☮️🌙🎸🔔🔫🕕🕓🚅`
+
+**How it works:**
+
+1. Extracts the 9 emoji from the emojicode
+2. First emoji (💚) is the federation prefix
+3. Next 3 emoji identify the wiki location (e.g., ☮️🌙🎸)
+4. Remaining 5 emoji identify the BDO UUID
+5. Looks up the location identifier in the federation registry
+6. If the BDO is on this wiki, fetches locally
+7. If the BDO is on a remote wiki, forwards the request automatically
+
+**Response:**
+```json
+{
+  "emojicode": "💚☮️🌙🎸🔔🔫🕕🕓🚅",
+  "pubKey": "029dd60e726cbcc00fc486e158751d290172cc92733a3be4a5d18a2ef07e097f73",
+  "bdo": {
+    "data": "Test BDO data",
+    "timestamp": 1761676196398
+  },
+  "createdAt": 1761676196526
+}
+```
+
+**Key Features:**
+- Automatic cross-wiki resolution
+- Location-based routing using emoji identifiers
+- Transparent local vs. remote detection
+- Compatible with Docker networking (host.docker.internal)
 
 ### Federation
 

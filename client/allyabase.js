@@ -31,6 +31,87 @@ function emit($item, item) {
   title.textContent = 'Allyabase Management';
   container.appendChild(title);
 
+  // Add base emoji identifier section
+  const baseEmojiContainer = document.createElement('div');
+  baseEmojiContainer.style.padding = '10px';
+  baseEmojiContainer.style.marginBottom = '15px';
+  baseEmojiContainer.style.backgroundColor = '#f5f5f5';
+  baseEmojiContainer.style.borderRadius = '5px';
+  baseEmojiContainer.style.border = '1px solid #ddd';
+
+  const baseEmojiTitle = document.createElement('div');
+  baseEmojiTitle.style.fontWeight = 'bold';
+  baseEmojiTitle.style.marginBottom = '5px';
+  baseEmojiTitle.textContent = 'Base Identifier:';
+  baseEmojiContainer.appendChild(baseEmojiTitle);
+
+  const baseEmojiDisplay = document.createElement('div');
+  baseEmojiDisplay.id = 'base-emoji-display';
+  baseEmojiDisplay.style.fontSize = '24px';
+  baseEmojiDisplay.style.marginBottom = '5px';
+  baseEmojiDisplay.textContent = 'Loading...';
+  baseEmojiContainer.appendChild(baseEmojiDisplay);
+
+  const baseEmojiCopyBtn = document.createElement('button');
+  baseEmojiCopyBtn.textContent = 'Copy';
+  baseEmojiCopyBtn.style.padding = '5px 10px';
+  baseEmojiCopyBtn.style.fontSize = '11px';
+  baseEmojiCopyBtn.style.cursor = 'pointer';
+  baseEmojiCopyBtn.style.marginRight = '5px';
+  baseEmojiContainer.appendChild(baseEmojiCopyBtn);
+
+  const baseEmojiHelp = document.createElement('span');
+  baseEmojiHelp.style.fontSize = '11px';
+  baseEmojiHelp.style.color = '#666';
+  baseEmojiHelp.textContent = '(federation prefix + location identifier)';
+  baseEmojiContainer.appendChild(baseEmojiHelp);
+
+  container.appendChild(baseEmojiContainer);
+
+  // Fetch and display base emoji
+  async function loadBaseEmoji() {
+    try {
+      const response = await get('/plugin/allyabase/base-emoji');
+      const data = await response.json();
+      const baseEmoji = data.baseEmoji;
+
+      if (data.locationEmoji) {
+        baseEmojiDisplay.textContent = baseEmoji;
+        baseEmojiDisplay.style.cursor = 'pointer';
+        baseEmojiDisplay.title = 'Click to copy';
+
+        // Click to copy functionality
+        const copyToClipboard = (text) => {
+          navigator.clipboard.writeText(text).then(() => {
+            const originalText = baseEmojiCopyBtn.textContent;
+            baseEmojiCopyBtn.textContent = '✓ Copied!';
+            baseEmojiCopyBtn.style.color = 'green';
+            setTimeout(() => {
+              baseEmojiCopyBtn.textContent = originalText;
+              baseEmojiCopyBtn.style.color = '';
+            }, 2000);
+          });
+        };
+
+        baseEmojiDisplay.addEventListener('click', () => copyToClipboard(baseEmoji));
+        baseEmojiCopyBtn.addEventListener('click', () => copyToClipboard(baseEmoji));
+      } else {
+        baseEmojiDisplay.textContent = 'Not configured';
+        baseEmojiDisplay.style.fontSize = '14px';
+        baseEmojiDisplay.style.color = '#999';
+        baseEmojiCopyBtn.style.display = 'none';
+      }
+    } catch (err) {
+      baseEmojiDisplay.textContent = 'Unable to load';
+      baseEmojiDisplay.style.fontSize = '14px';
+      baseEmojiDisplay.style.color = '#999';
+      baseEmojiCopyBtn.style.display = 'none';
+      console.error('Error loading base emoji:', err);
+    }
+  }
+
+  loadBaseEmoji();
+
   // Add launch button
   const launchButton = document.createElement('button');
   launchButton.textContent = 'Launch a Base';

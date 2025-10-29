@@ -5,11 +5,12 @@ const http = require('http');
 const httpProxy = require('http-proxy');
 const fs = require('fs');
 const federationResolver = require('./federation-resolver');
-const BDO = require('bdo-js');
+const bdoModule = require('bdo-js');
+const bdo = bdoModule.default || bdoModule;
 
 // Expected ports for all services based on allyabase_setup.sh
 const SERVICE_PORTS = {
-  julia: 3001,        // Changed from 3000 to avoid conflict with wiki server
+  julia: 3000,
   continuebee: 2999,
   fount: 3002,
   bdo: 3003,
@@ -30,7 +31,7 @@ let baseStatus = {
   lastLaunch: null
 };
 
-// Function to load wiki's owner.json for keypair
+// Function to load wiki's owner.json for keypair and location emoji
 function loadWikiKeypair() {
   try {
     const ownerPath = path.join(process.env.HOME || '/root', '.wiki/status/owner.json');
@@ -39,7 +40,9 @@ function loadWikiKeypair() {
       if (ownerData.sessionlessKeys) {
         return {
           pubKey: ownerData.sessionlessKeys.pubKey,
-          privateKey: ownerData.sessionlessKeys.privateKey
+          privateKey: ownerData.sessionlessKeys.privateKey,
+          locationEmoji: ownerData.locationEmoji,
+          federationEmoji: ownerData.federationEmoji
         };
       }
     }
@@ -113,9 +116,288 @@ async function startServer(params) {
 
   // Handle proxy errors
   proxy.on('error', function(err, req, res) {
-    console.error('Proxy error:', err);
-    res.writeHead(500, { 'Content-Type': 'text/plain' });
-    res.end('Proxy error: ' + err.message);
+    console.error('[PROXY ERROR]', err.message);
+    console.error('[PROXY ERROR] Stack:', err.stack);
+
+    // Return JSON error response for API compatibility
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      error: 'Service not available',
+      message: err.message
+    }));
+  });
+
+  // Log proxy request and restream body if needed
+  proxy.on('proxyReq', function(proxyReq, req, res, options) {
+    console.log('[PROXY] Request sent to target:', proxyReq.path);
+
+    // If body was parsed by Express, we need to restream it
+    if (req.body && Object.keys(req.body).length > 0) {
+      let bodyData = JSON.stringify(req.body);
+      console.log('[PROXY] Restreaming body:', bodyData.substring(0, 200));
+      proxyReq.setHeader('Content-Type', 'application/json');
+      proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
+      proxyReq.write(bodyData);
+      proxyReq.end();
+    }
+  });
+
+  // Log proxy response
+  proxy.on('proxyRes', function(proxyRes, req, res) {
+    console.log('[PROXY] Response received from target, status:', proxyRes.statusCode);
+  });
+
+  // Special handler for BDO service to intercept emojicode requests
+  // Handles both BDO service emojicodes and federated emojicodes
+  app.get('/plugin/allyabase/bdo/emoji/:emojicode', async function(req, res) {
+    try {
+      const emojicode = decodeURIComponent(req.params.emojicode);
+      console.log(`[BDO EMOJI] GET /emoji/${emojicode}`);
+
+      // Check if this is a federated shortcode (has a slash) or BDO service emojicode (no slash)
+      // BDO service emojicode: 💚{3-location-emoji}{5-uuid-emoji} (9 emoji total, no slash)
+      // Federated shortcode: 💚{location-emoji}/bdo/{uuid} (has slash and path)
+      const hasSlash = emojicode.includes('/');
+
+      if (hasSlash) {
+        // This is a federated shortcode with a path - handle federation
+        console.log('[BDO EMOJI] Detected federated shortcode format (contains /)');
+
+        const parsed = federationResolver.parseFederatedShortcode(emojicode);
+        if (!parsed || !parsed.resourcePath || !parsed.resourcePath.includes('/bdo/')) {
+          return res.status(400).json({
+            error: 'Invalid federated shortcode format'
+          });
+        }
+        console.log('[BDO EMOJI] Parsed:', JSON.stringify(parsed, null, 2));
+
+        // Extract UUID from resource path
+        const uuidMatch = parsed.resourcePath.match(/\/bdo\/([a-f0-9-]+)/);
+        if (!uuidMatch) {
+          console.log('[BDO EMOJI] No UUID found in resource path');
+          return res.status(400).json({
+            error: 'Invalid BDO path in emojicode. Expected format: /bdo/{uuid}'
+          });
+        }
+        const uuid = uuidMatch[1];
+        console.log('[BDO EMOJI] UUID:', uuid);
+
+        // Resolve location emoji to URL
+        const currentWikiUrl = `http://localhost:${req.socket.localPort}`;
+        const baseTargetUrl = await federationResolver.resolveFederatedShortcode(
+          `💚${parsed.locationIdentifier}/`,
+          currentWikiUrl
+        );
+
+        const targetWikiUrl = baseTargetUrl.replace(/\/$/, '');
+        console.log('[BDO EMOJI] Target wiki:', targetWikiUrl);
+        console.log('[BDO EMOJI] Current wiki:', currentWikiUrl);
+
+        // Check if the target is this wiki (local request)
+        if (targetWikiUrl === currentWikiUrl || targetWikiUrl.includes(`localhost:${req.socket.localPort}`)) {
+          console.log('[BDO EMOJI] Local federated request - fetching from local BDO service');
+
+          // Fetch from local BDO service by UUID
+          const keypair = loadWikiKeypair();
+          if (!keypair) {
+            console.error('[BDO EMOJI] No keypair found for authentication');
+            return res.status(500).json({
+              error: 'Wiki keypair not found. Cannot authenticate request.'
+            });
+          }
+
+          const originalBaseURL = bdo.baseURL;
+          bdo.baseURL = 'http://localhost:3003/';
+
+          const getKeys = async () => keypair;
+          bdo.getKeys = getKeys;
+
+          const bdoData = await bdo.getBDO(uuid, '', keypair.pubKey);
+          bdo.baseURL = originalBaseURL;
+
+          console.log('[BDO EMOJI] Successfully retrieved local BDO via federation');
+          return res.json(bdoData);
+        } else {
+          // Remote federated request
+          console.log('[BDO EMOJI] Remote federated request - fetching from remote wiki');
+          const targetUrl = `${targetWikiUrl}/plugin/allyabase/bdo/emoji/${encodeURIComponent(emojicode)}`;
+          console.log('[BDO EMOJI] Fetching from:', targetUrl);
+
+          const response = await fetch(targetUrl);
+          const bdoData = await response.json();
+
+          console.log('[BDO EMOJI] Successfully retrieved remote federated BDO');
+          return res.json(bdoData);
+        }
+      }
+
+      // No slash - this is a BDO service emojicode
+      // Format: {3-location-emoji}{5-uuid-emoji} (8 emoji total)
+      // or with federation prefix: 💚{3-location-emoji}{5-uuid-emoji} (9 emoji total)
+      // Example: ☮️🏴📢😂🎭🔮📣 or 💚☮️🏴📢😂🎭🔮📣
+      console.log('[BDO EMOJI] Detected BDO service emojicode format (no slash)');
+
+      // Extract the first 3 emoji as the location identifier
+      // Use a more comprehensive emoji regex that handles all emoji including those without Emoji_Presentation
+      // This includes emoji like 🏔 (U+1F3D4) which need variation selector FE0F
+      const emojiRegex = /[\u{1F1E6}-\u{1F1FF}]{2}|(?:[\u{1F3F4}\u{1F3F3}][\u{FE0F}]?(?:\u{200D}[\u{2620}\u{2695}\u{2696}\u{2708}\u{1F308}][\u{FE0F}]?)?)|(?:\p{Emoji_Presentation}|\p{Emoji})[\u{FE0F}\u{200D}]?(?:\u{200D}(?:\p{Emoji_Presentation}|\p{Emoji})[\u{FE0F}]?)*/gu;
+      const emojis = emojicode.match(emojiRegex) || [];
+      console.log('[BDO EMOJI] Extracted emojis:', emojis);
+      console.log('[BDO EMOJI] Emoji count:', emojis.length);
+
+      // Determine location based on whether it starts with 💚
+      // With 💚: 9 emoji total (💚 + 3 location + 5 UUID), location at indices 1, 2, 3
+      // Without 💚: 8 emoji total (3 location + 5 UUID), location at indices 0, 1, 2
+      let locationEmojis;
+      let hasGreenHeart = emojis[0] === '💚';
+
+      if (hasGreenHeart) {
+        // Format: 💚 + 3 location + 5 UUID = 9 emoji
+        if (emojis.length !== 9) {
+          console.log('[BDO EMOJI] Invalid emoji count with 💚');
+          return res.status(400).json({
+            error: 'Invalid emojicode format',
+            detail: `Expected 9 emoji (💚 + 3 location + 5 UUID), got ${emojis.length}`,
+            emojicode,
+            emojis
+          });
+        }
+        // Skip the green heart (index 0), take indices 1, 2, 3
+        locationEmojis = [emojis[1], emojis[2], emojis[3]];
+        console.log('[BDO EMOJI] Format: 💚 + 3 location + 5 UUID (9 total)');
+      } else {
+        // Format: 3 location + 5 UUID = 8 emoji
+        if (emojis.length !== 8) {
+          console.log('[BDO EMOJI] Invalid emoji count without 💚');
+          return res.status(400).json({
+            error: 'Invalid emojicode format',
+            detail: `Expected 8 emoji (3 location + 5 UUID), got ${emojis.length}`,
+            emojicode,
+            emojis
+          });
+        }
+        // Take indices 0, 1, 2
+        locationEmojis = [emojis[0], emojis[1], emojis[2]];
+        console.log('[BDO EMOJI] Format: 3 location + 5 UUID (8 total, no 💚)');
+      }
+
+      const locationIdentifier = locationEmojis.join('');
+      console.log('[BDO EMOJI] Location emoji (extracted):', locationEmojis);
+      console.log('[BDO EMOJI] Location identifier (joined):', locationIdentifier);
+
+      // Check if this location is registered (indicates cross-wiki request)
+      const locations = federationResolver.getRegisteredLocations();
+      console.log('[BDO EMOJI] Registered locations:', Object.keys(locations));
+
+      const targetWikiUrls = locations[locationIdentifier];
+
+      if (targetWikiUrls && targetWikiUrls.length > 0) {
+        // This is a cross-wiki request - try all registered URLs
+        const currentWikiUrl = `http://localhost:${req.socket.localPort}`;
+        const wikiInfo = loadWikiKeypair();
+        const thisWikiLocationEmoji = wikiInfo ? wikiInfo.locationEmoji : null;
+
+        console.log('[BDO EMOJI] Cross-wiki request detected');
+        console.log('[BDO EMOJI] Target wikis (${targetWikiUrls.length}): ${targetWikiUrls.join(', ')}');
+        console.log('[BDO EMOJI] Current wiki:', currentWikiUrl);
+        console.log('[BDO EMOJI] This wiki location emoji:', thisWikiLocationEmoji);
+
+        // Try all URLs in parallel
+        const fetchPromises = targetWikiUrls.map(async (targetUrl) => {
+          const isLocalWiki = (targetUrl === currentWikiUrl ||
+                              targetUrl.includes(`localhost:${req.socket.localPort}`) ||
+                              (thisWikiLocationEmoji && locationIdentifier === thisWikiLocationEmoji));
+
+          if (isLocalWiki) {
+            console.log(`[BDO EMOJI] Fetching from local service for ${targetUrl}`);
+            try {
+              const localUrl = `http://localhost:3003/emoji/${encodeURIComponent(emojicode)}`;
+              const response = await fetch(localUrl);
+              const data = await response.json();
+              return { url: targetUrl, success: !data.error, data };
+            } catch (err) {
+              return { url: targetUrl, success: false, error: err.message };
+            }
+          } else {
+            console.log(`[BDO EMOJI] Forwarding to remote wiki: ${targetUrl}`);
+            try {
+              const forwardUrl = `${targetUrl}/plugin/allyabase/bdo/emoji/${encodeURIComponent(emojicode)}`;
+              const response = await fetch(forwardUrl);
+              const data = await response.json();
+              return { url: targetUrl, success: !data.error, data };
+            } catch (err) {
+              return { url: targetUrl, success: false, error: err.message };
+            }
+          }
+        });
+
+        const results = await Promise.all(fetchPromises);
+        console.log(`[BDO EMOJI] Fetched from ${results.length} URLs`);
+
+        // Filter successful results
+        const successfulResults = results.filter(r => r.success);
+        console.log(`[BDO EMOJI] ${successfulResults.length}/${results.length} URLs returned BDOs`);
+
+        if (successfulResults.length === 0) {
+          // No wikis had this BDO
+          return res.status(404).json({
+            error: 'BDO not found',
+            detail: `Tried ${results.length} wiki(s), none had this BDO`,
+            locationIdentifier,
+            emojicode,
+            attempts: results.map(r => ({ url: r.url, error: r.error || 'Not found' }))
+          });
+        }
+
+        // Return all successful results
+        if (successfulResults.length === 1) {
+          // Single result - return directly for backward compatibility
+          console.log('[BDO EMOJI] Single BDO found, returning directly');
+          return res.json(successfulResults[0].data);
+        } else {
+          // Multiple results - return as array with metadata
+          console.log(`[BDO EMOJI] Multiple BDOs found (${successfulResults.length}), returning array`);
+          return res.json({
+            count: successfulResults.length,
+            results: successfulResults.map(r => ({ source: r.url, bdo: r.data }))
+          });
+        }
+      } else {
+        console.log('[BDO EMOJI] Location not registered, assuming local BDO');
+      }
+
+      // Fetch from local BDO service
+      console.log('[BDO EMOJI] Fetching from local BDO service');
+      const bdoServiceUrl = `http://localhost:3003/emoji/${encodeURIComponent(emojicode)}`;
+      console.log('[BDO EMOJI] Local BDO service URL:', bdoServiceUrl);
+
+      const response = await fetch(bdoServiceUrl);
+      const bdoData = await response.json();
+
+      if (bdoData.error) {
+        console.log('[BDO EMOJI] Local BDO service returned error:', bdoData.error);
+        return res.status(response.status || 404).json({
+          error: 'Local BDO not found',
+          detail: bdoData.error,
+          locationIdentifier,
+          registeredLocations: Object.keys(locations),
+          emojicode
+        });
+      }
+
+      console.log('[BDO EMOJI] Successfully retrieved BDO from local service');
+      console.log('[BDO EMOJI] BDO data type:', typeof bdoData);
+      console.log('[BDO EMOJI] BDO data keys:', bdoData ? Object.keys(bdoData) : 'null');
+
+      return res.json(bdoData);
+
+    } catch (err) {
+      console.error('[BDO EMOJI] Error:', err);
+      res.status(500).json({
+        error: 'Failed to fetch BDO by emojicode',
+        message: err.message
+      });
+    }
   });
 
   // Create proxy routes for each service
@@ -123,6 +405,8 @@ async function startServer(params) {
     // Proxy all methods (GET, POST, PUT, DELETE, etc.)
     app.all(`/plugin/allyabase/${service}/*`, function(req, res) {
       const targetPath = req.url.replace(`/plugin/allyabase/${service}`, '');
+      console.log(`[PROXY] ${req.method} /plugin/allyabase/${service}${targetPath} -> http://localhost:${port}${targetPath}`);
+      console.log(`[PROXY] Headers:`, JSON.stringify(req.headers, null, 2));
       req.url = targetPath;
       proxy.web(req, res, {
         target: `http://localhost:${port}`,
@@ -132,6 +416,8 @@ async function startServer(params) {
 
     // Also handle root service path
     app.all(`/plugin/allyabase/${service}`, function(req, res) {
+      console.log(`[PROXY] ${req.method} /plugin/allyabase/${service} -> http://localhost:${port}/`);
+      console.log(`[PROXY] Headers:`, JSON.stringify(req.headers, null, 2));
       req.url = '/';
       proxy.web(req, res, {
         target: `http://localhost:${port}`,
@@ -211,6 +497,31 @@ async function startServer(params) {
     res.send(baseStatus);
   });
 
+  // Endpoint to get wiki's base emoji identifier
+  app.get('/plugin/allyabase/base-emoji', function(req, res) {
+    try {
+      const ownerPath = path.join(process.env.HOME || '/root', '.wiki/status/owner.json');
+      if (fs.existsSync(ownerPath)) {
+        const ownerData = JSON.parse(fs.readFileSync(ownerPath, 'utf8'));
+        res.send({
+          federationEmoji: ownerData.federationEmoji || '💚',
+          locationEmoji: ownerData.locationEmoji || null,
+          baseEmoji: (ownerData.federationEmoji || '💚') + (ownerData.locationEmoji || '')
+        });
+      } else {
+        res.status(404).send({
+          error: 'Owner configuration not found'
+        });
+      }
+    } catch (err) {
+      console.error('Error reading owner.json:', err);
+      res.status(500).send({
+        error: 'Failed to load base emoji',
+        message: err.message
+      });
+    }
+  });
+
   // ===== FEDERATION ENDPOINTS =====
 
   // Register this wiki's location identifier
@@ -225,12 +536,13 @@ async function startServer(params) {
         });
       }
 
-      federationResolver.registerLocation(locationIdentifier, url);
+      const result = federationResolver.registerLocation(locationIdentifier, url);
 
       res.send({
-        success: true,
+        success: result.added,
         locationIdentifier,
-        url
+        url,
+        ...result
       });
     } catch (err) {
       console.error('Error registering location:', err);
@@ -412,8 +724,17 @@ async function startServer(params) {
       console.log('[federation/fetch-bdo] Fetching from:', bdoServiceUrl);
       console.log('[federation/fetch-bdo] UUID:', uuid);
 
-      // Use bdo.get to fetch the BDO with signed request
-      const bdoData = await bdo.get(uuid, bdoServiceUrl);
+      // Temporarily set baseURL to target wiki's BDO service
+      const originalBaseURL = bdo.baseURL;
+      bdo.baseURL = bdoServiceUrl + '/';
+
+      // Use bdo.getBDO to fetch the BDO
+      // Provide getKeys function for this wiki's authentication
+      const getKeys = async () => ({ pubKey: keypair.pubKey, privateKey: keypair.privateKey });
+      const bdoData = await bdo.getBDO(uuid, getKeys);
+
+      // Restore original baseURL
+      bdo.baseURL = originalBaseURL;
 
       console.log('[federation/fetch-bdo] Successfully retrieved BDO');
 

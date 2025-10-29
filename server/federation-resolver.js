@@ -17,7 +17,9 @@ const FEDERATION_PREFIX = '💚';
 const LOCATION_EMOJI_COUNT = 3;
 
 // In-memory cache for emoji -> URL mappings
+// Each location identifier maps to an array of URLs (max 9)
 const locationCache = new Map();
+const MAX_URLS_PER_LOCATION = 9;
 
 /**
  * Extract emoji characters from a string
@@ -142,17 +144,20 @@ async function getNeighborhood(wikiUrl) {
 }
 
 /**
- * Discover location URL by querying neighborhood (breadth-first search)
+ * Discover location URLs by querying neighborhood (breadth-first search)
+ * Returns array of URLs for this location
  */
 async function discoverLocation(startWikiUrl, locationIdentifier, maxHops = 3) {
   // Check cache first (local registry)
   if (locationCache.has(locationIdentifier)) {
-    console.log(`Found location ${locationIdentifier} in local cache -> ${locationCache.get(locationIdentifier)}`);
-    return locationCache.get(locationIdentifier);
+    const urls = locationCache.get(locationIdentifier);
+    console.log(`Found location ${locationIdentifier} in local cache -> ${urls.join(', ')}`);
+    return urls;
   }
 
   const visited = new Set();
   const queue = [{ url: startWikiUrl, hop: 0 }];
+  const foundUrls = []; // Collect all URLs that respond for this location
 
   while (queue.length > 0) {
     const { url, hop } = queue.shift();
@@ -168,14 +173,19 @@ async function discoverLocation(startWikiUrl, locationIdentifier, maxHops = 3) {
     // Query this wiki for the location
     const foundUrl = await queryWikiForLocation(url, locationIdentifier);
 
-    if (foundUrl) {
+    if (foundUrl && !foundUrls.includes(foundUrl)) {
       console.log(`Found location ${locationIdentifier} -> ${foundUrl}`);
-      // Cache the result
-      locationCache.set(locationIdentifier, foundUrl);
-      return foundUrl;
+      foundUrls.push(foundUrl);
+
+      // Don't return immediately - continue searching to find all URLs
+      // But limit to MAX_URLS_PER_LOCATION
+      if (foundUrls.length >= MAX_URLS_PER_LOCATION) {
+        console.log(`Reached maximum URLs (${MAX_URLS_PER_LOCATION}) for location ${locationIdentifier}`);
+        break;
+      }
     }
 
-    // If not found, get this wiki's neighborhood and add to queue
+    // Get this wiki's neighborhood and add to queue
     if (hop < maxHops) {
       const neighborhood = await getNeighborhood(url);
       neighborhood.forEach(neighborUrl => {
@@ -186,11 +196,20 @@ async function discoverLocation(startWikiUrl, locationIdentifier, maxHops = 3) {
     }
   }
 
-  return null;
+  // Cache all found URLs
+  if (foundUrls.length > 0) {
+    locationCache.set(locationIdentifier, foundUrls);
+    console.log(`Cached ${foundUrls.length} URL(s) for location ${locationIdentifier}`);
+    return foundUrls;
+  }
+
+  return [];
 }
 
 /**
  * Resolve a federated shortcode to a full URL
+ * Returns first URL found (for backward compatibility)
+ * Use discoverLocation directly to get all URLs
  */
 async function resolveFederatedShortcode(shortcode, currentWikiUrl) {
   const parsed = parseFederatedShortcode(shortcode);
@@ -199,12 +218,15 @@ async function resolveFederatedShortcode(shortcode, currentWikiUrl) {
     throw new Error('Not a valid federated shortcode');
   }
 
-  // Discover the base URL for this location
-  const baseUrl = await discoverLocation(currentWikiUrl, parsed.locationIdentifier);
+  // Discover the base URLs for this location
+  const baseUrls = await discoverLocation(currentWikiUrl, parsed.locationIdentifier);
 
-  if (!baseUrl) {
+  if (!baseUrls || baseUrls.length === 0) {
     throw new Error(`Could not find location ${parsed.locationIdentifier} in federation`);
   }
+
+  // Return first URL for backward compatibility
+  const baseUrl = baseUrls[0];
 
   // Construct the full URL
   return `${baseUrl}${parsed.resourcePath}`;
@@ -212,10 +234,36 @@ async function resolveFederatedShortcode(shortcode, currentWikiUrl) {
 
 /**
  * Register this wiki's location identifier
+ * Supports multiple URLs per location (max 9)
  */
 function registerLocation(locationIdentifier, url) {
-  locationCache.set(locationIdentifier, url);
-  console.log(`Registered location: ${locationIdentifier} -> ${url}`);
+  // Get existing URLs for this location
+  let urls = locationCache.get(locationIdentifier) || [];
+
+  // Check if URL already registered
+  if (urls.includes(url)) {
+    console.log(`Location already registered: ${locationIdentifier} -> ${url}`);
+    return { added: false, reason: 'already_exists', urlCount: urls.length };
+  }
+
+  // Check if we've hit the maximum
+  if (urls.length >= MAX_URLS_PER_LOCATION) {
+    console.warn(`⚠️  Maximum URLs (${MAX_URLS_PER_LOCATION}) reached for location: ${locationIdentifier}`);
+    console.warn(`    Existing URLs: ${urls.join(', ')}`);
+    console.warn(`    Rejected URL: ${url}`);
+    return { added: false, reason: 'max_reached', urlCount: urls.length, maxUrls: MAX_URLS_PER_LOCATION };
+  }
+
+  // Add the new URL
+  urls.push(url);
+  locationCache.set(locationIdentifier, urls);
+  console.log(`✓ Registered location: ${locationIdentifier} -> ${url} (${urls.length}/${MAX_URLS_PER_LOCATION})`);
+
+  if (urls.length > 1) {
+    console.log(`  ℹ️  Multiple URLs for ${locationIdentifier}: ${urls.join(', ')}`);
+  }
+
+  return { added: true, urlCount: urls.length, maxUrls: MAX_URLS_PER_LOCATION };
 }
 
 /**

@@ -7,14 +7,14 @@ services:
       dockerfile: test/Dockerfile
     container_name: fedwiki-test-1
     ports:
-      - "7070:3000"
+      - "7070:4000"
     environment:
-      - PORT=3000
+      - PORT=4000
       - SECURITY_TYPE=sessionless
     volumes:
       - wiki1-data:/root/.wiki
       - ./wiki-configs/wiki1/status/owner.json:/root/.wiki/status/owner.json
-    command: wiki --port 3000 --security_type sessionless
+    command: wiki --port 4000 --security_type sessionless
     networks:
       - fedwiki-network
 
@@ -24,14 +24,14 @@ services:
       dockerfile: test/Dockerfile
     container_name: fedwiki-test-2
     ports:
-      - "7071:3000"
+      - "7071:4000"
     environment:
-      - PORT=3000
+      - PORT=4000
       - SECURITY_TYPE=sessionless
     volumes:
       - wiki2-data:/root/.wiki
       - ./wiki-configs/wiki2/status/owner.json:/root/.wiki/status/owner.json
-    command: wiki --port 3000 --security_type sessionless
+    command: wiki --port 4000 --security_type sessionless
     networks:
       - fedwiki-network
 
@@ -41,14 +41,14 @@ services:
       dockerfile: test/Dockerfile
     container_name: fedwiki-test-3
     ports:
-      - "7072:3000"
+      - "7072:4000"
     environment:
-      - PORT=3000
+      - PORT=4000
       - SECURITY_TYPE=sessionless
     volumes:
       - wiki3-data:/root/.wiki
       - ./wiki-configs/wiki3/status/owner.json:/root/.wiki/status/owner.json
-    command: wiki --port 3000 --security_type sessionless
+    command: wiki --port 4000 --security_type sessionless
     networks:
       - fedwiki-network
 
@@ -58,14 +58,14 @@ services:
       dockerfile: Dockerfile.plain
     container_name: fedwiki-test-4
     ports:
-      - "7073:3000"
+      - "7073:4000"
     environment:
-      - PORT=3000
+      - PORT=4000
       - SECURITY_TYPE=sessionless
     volumes:
       - wiki4-data:/root/.wiki
       - ./wiki-configs/wiki4/status/owner.json:/root/.wiki/status/owner.json
-    command: wiki --port 3000 --security_type sessionless
+    command: wiki --port 4000 --security_type sessionless
     networks:
       - fedwiki-network
 
@@ -75,14 +75,14 @@ services:
       dockerfile: Dockerfile.plain
     container_name: fedwiki-test-5
     ports:
-      - "7074:3000"
+      - "7074:4000"
     environment:
-      - PORT=3000
+      - PORT=4000
       - SECURITY_TYPE=sessionless
     volumes:
       - wiki5-data:/root/.wiki
       - ./wiki-configs/wiki5/status/owner.json:/root/.wiki/status/owner.json
-    command: wiki --port 3000 --security_type sessionless
+    command: wiki --port 4000 --security_type sessionless
     networks:
       - fedwiki-network
 
