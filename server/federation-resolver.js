@@ -12,6 +12,8 @@
 
 const http = require('http');
 const https = require('https');
+const fs = require('fs');
+const path = require('path');
 
 const FEDERATION_PREFIX = '💚';
 const LOCATION_EMOJI_COUNT = 3;
@@ -20,6 +22,61 @@ const LOCATION_EMOJI_COUNT = 3;
 // Each location identifier maps to an array of URLs (max 9)
 const locationCache = new Map();
 const MAX_URLS_PER_LOCATION = 9;
+
+// File-based persistence
+const FEDERATION_FILE = path.join(process.env.HOME || '/root', '.wiki/federation-registry.json');
+
+/**
+ * Load federation registry from file
+ */
+function loadRegistry() {
+  try {
+    if (fs.existsSync(FEDERATION_FILE)) {
+      const data = fs.readFileSync(FEDERATION_FILE, 'utf8');
+      const registry = JSON.parse(data);
+
+      // Restore to Map
+      locationCache.clear();
+      for (const [emoji, urls] of Object.entries(registry)) {
+        locationCache.set(emoji, urls);
+      }
+
+      console.log(`[federation-resolver] Loaded ${Object.keys(registry).length} locations from ${FEDERATION_FILE}`);
+      return true;
+    }
+  } catch (err) {
+    console.error('[federation-resolver] Error loading registry:', err);
+  }
+  return false;
+}
+
+/**
+ * Save federation registry to file
+ */
+function saveRegistry() {
+  try {
+    // Ensure directory exists
+    const dir = path.dirname(FEDERATION_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    // Convert Map to plain object
+    const registry = Object.fromEntries(locationCache);
+
+    // Write to file
+    fs.writeFileSync(FEDERATION_FILE, JSON.stringify(registry, null, 2), 'utf8');
+
+    console.log(`[federation-resolver] Saved ${Object.keys(registry).length} locations to ${FEDERATION_FILE}`);
+    return true;
+  } catch (err) {
+    console.error('[federation-resolver] Error saving registry:', err);
+    return false;
+  }
+}
+
+// Load registry on startup
+loadRegistry();
 
 /**
  * Extract emoji characters from a string
@@ -262,6 +319,9 @@ function registerLocation(locationIdentifier, url) {
   if (urls.length > 1) {
     console.log(`  ℹ️  Multiple URLs for ${locationIdentifier}: ${urls.join(', ')}`);
   }
+
+  // Persist to file
+  saveRegistry();
 
   return { added: true, urlCount: urls.length, maxUrls: MAX_URLS_PER_LOCATION };
 }

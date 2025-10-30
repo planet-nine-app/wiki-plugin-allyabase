@@ -111,6 +111,34 @@ async function healthcheck() {
 async function startServer(params) {
   const app = params.app;
 
+  // CORS middleware for federation endpoints
+  // Allows cross-origin requests from other federated wikis
+  app.use('/plugin/allyabase/federation/*', function(req, res, next) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    // Handle preflight requests
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(200);
+    }
+
+    next();
+  });
+
+  // CORS for base-emoji endpoint (needed for fork detection)
+  app.use('/plugin/allyabase/base-emoji', function(req, res, next) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(200);
+    }
+
+    next();
+  });
+
   // Create proxy server
   const proxy = httpProxy.createProxyServer({});
 
@@ -503,14 +531,46 @@ async function startServer(params) {
       const ownerPath = path.join(process.env.HOME || '/root', '.wiki/status/owner.json');
       if (fs.existsSync(ownerPath)) {
         const ownerData = JSON.parse(fs.readFileSync(ownerPath, 'utf8'));
-        res.send({
+
+        const response = {
           federationEmoji: ownerData.federationEmoji || '💚',
           locationEmoji: ownerData.locationEmoji || null,
-          baseEmoji: (ownerData.federationEmoji || '💚') + (ownerData.locationEmoji || '')
-        });
+          baseEmoji: (ownerData.federationEmoji || '💚') + (ownerData.locationEmoji || ''),
+          warnings: []
+        };
+
+        // Validation warnings
+        if (!ownerData.locationEmoji) {
+          response.warnings.push({
+            severity: 'error',
+            message: 'Missing locationEmoji in owner.json',
+            fix: 'Add "locationEmoji": "🔥💎🌟" (3 emoji) to your owner.json'
+          });
+        } else if (!ownerData.federationEmoji) {
+          response.warnings.push({
+            severity: 'warning',
+            message: 'Missing federationEmoji in owner.json, using default 💚',
+            fix: 'Add "federationEmoji": "💚" to your owner.json'
+          });
+        }
+
+        if (!ownerData.sessionlessKeys) {
+          response.warnings.push({
+            severity: 'error',
+            message: 'Missing sessionlessKeys in owner.json',
+            fix: 'BDO operations will fail without sessionless keys'
+          });
+        }
+
+        res.send(response);
       } else {
         res.status(404).send({
-          error: 'Owner configuration not found'
+          error: 'Owner configuration not found',
+          warnings: [{
+            severity: 'error',
+            message: 'owner.json file not found',
+            fix: 'Create ~/.wiki/status/owner.json with locationEmoji and sessionlessKeys'
+          }]
         });
       }
     } catch (err) {

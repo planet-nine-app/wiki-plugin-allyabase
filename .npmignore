@@ -1,0 +1,14 @@
+# Test environment (large Docker setup)
+test/
+
+# Documentation not needed in package
+CLAUDE.md
+FEDERATION.md
+PRODUCTION-READY.md
+
+# Git files
+.git
+.gitignore
+
+# Development files
+node_modules
