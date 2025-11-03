@@ -2,8 +2,10 @@
 
 set -e
 
-tmpDir="${TMPDIR:-${XDG_RUNTIME_DIR:-/tmp}}"
-buildDir="${1:-$tmpDir}"
+# Use /var/lib for persistent storage on Ubuntu instead of /tmp
+# /var/lib is the standard location for application state data that persists across reboots
+defaultDir="/var/lib"
+buildDir="${1:-$defaultDir}"
 [[ $buildDir != /* ]]&& buildDir="${PWD%/}/$buildDir"
 buildDir="${buildDir#./}/allyabase"
 ecosystem_config='ecosystem.config.js'

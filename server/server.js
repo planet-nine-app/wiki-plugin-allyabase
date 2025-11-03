@@ -5,6 +5,7 @@ const http = require('http');
 const httpProxy = require('http-proxy');
 const fs = require('fs');
 const federationResolver = require('./federation-resolver');
+const deployment = require('./deployment');
 const bdoModule = require('bdo-js');
 const bdo = bdoModule.default || bdoModule;
 
@@ -110,6 +111,14 @@ async function healthcheck() {
 
 async function startServer(params) {
   const app = params.app;
+
+  // Owner middleware to protect state-changing endpoints
+  const owner = function (req, res, next) {
+    if (!app.securityhandler.isAuthorized(req)) {
+      return res.status(401).send('must be owner')
+    }
+    return next()
+  };
 
   // CORS middleware for federation endpoints
   // Allows cross-origin requests from other federated wikis
@@ -455,7 +464,7 @@ async function startServer(params) {
   });
 
   // Endpoint to launch the allyabase
-  app.post('/plugin/allyabase/launch', async function(req, res) {
+  app.post('/plugin/allyabase/launch', owner, async function(req, res) {
     try {
       // Use script bundled with the plugin
       const scriptPath = path.join(__dirname, '../allyabase_setup.sh');
@@ -585,7 +594,7 @@ async function startServer(params) {
   // ===== FEDERATION ENDPOINTS =====
 
   // Register this wiki's location identifier
-  app.post('/plugin/allyabase/federation/register', function(req, res) {
+  app.post('/plugin/allyabase/federation/register', owner, function(req, res) {
     try {
       const { locationIdentifier, url } = req.body;
 
@@ -817,6 +826,9 @@ async function startServer(params) {
       });
     }
   });
+
+  // Add deployment routes
+  deployment.addRoutes(params);
 }
 
 module.exports = { startServer };
