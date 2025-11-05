@@ -77,7 +77,7 @@ setup_ecosystem() {
         echo "Both package.json and package-lock.json are already present. Skipping initialization."
     fi
 
-    npm install pm2-runtime
+    npm install pm2
 
     # Try to read location emoji and federation emoji from wiki's owner.json
     LOCATION_EMOJI=""
@@ -166,6 +166,11 @@ setup_ecosystem() {
 main() {
     setup_services
     setup_ecosystem
-    
-    ./node_modules/.bin/pm2-runtime start ecosystem.config.js
+
+    # Start with pm2 daemon (allows pm2 logs, pm2 status, etc.)
+    ./node_modules/.bin/pm2 start ecosystem.config.js
+
+    # Keep the script running so services stay up
+    # This allows the wiki plugin to keep the process alive
+    ./node_modules/.bin/pm2 logs
 }; main
