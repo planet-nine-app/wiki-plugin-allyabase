@@ -13,11 +13,11 @@ const bdo = bdoModule.default || bdoModule;
 const SERVICE_PORTS = {
   julia: 3000,
   continuebee: 2999,
-  fount: 3002,
+  fount: 3006,
   bdo: 3003,
   joan: 3004,
   addie: 3005,
-  pref: 3006,
+  pref: 3002,
   dolores: 3007,
   prof: 3008,
   covenant: 3011,
