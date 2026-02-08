@@ -1,5 +1,5 @@
 (function() {
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
 const httpProxy = require('http-proxy');
@@ -26,11 +26,16 @@ const SERVICE_PORTS = {
   sanora: 7243
 };
 
+// PID file for tracking PM2 process
+const PM2_PID_FILE = path.join(__dirname, 'allyabase-pm2.pid');
+
 let baseStatus = {
   running: false,
   services: {},
   lastLaunch: null
 };
+
+let allyabaseProcess = null;
 
 // Function to load wiki's owner.json for keypair and location emoji
 function loadWikiKeypair() {
@@ -53,6 +58,162 @@ function loadWikiKeypair() {
     console.error('[wiki-plugin-allyabase] Error loading wiki keypair:', err);
     return null;
   }
+}
+
+// Function to kill process by PID
+function killProcessByPid(pid) {
+  try {
+    console.log(`[wiki-plugin-allyabase] Attempting to kill process ${pid}...`);
+    process.kill(pid, 'SIGTERM');
+
+    // Wait a bit, then force kill if still running
+    setTimeout(() => {
+      try {
+        process.kill(pid, 0); // Check if still alive
+        console.log(`[wiki-plugin-allyabase] Process ${pid} still running, sending SIGKILL...`);
+        process.kill(pid, 'SIGKILL');
+      } catch (err) {
+        // Process is dead, which is what we want
+        console.log(`[wiki-plugin-allyabase] ✅ Process ${pid} terminated successfully`);
+      }
+    }, 2000);
+
+    return true;
+  } catch (err) {
+    if (err.code === 'ESRCH') {
+      console.log(`[wiki-plugin-allyabase] Process ${pid} does not exist`);
+    } else {
+      console.error(`[wiki-plugin-allyabase] Error killing process ${pid}:`, err.message);
+    }
+    return false;
+  }
+}
+
+// Function to find and kill process using a specific port
+function killProcessByPort(port) {
+  return new Promise((resolve) => {
+    // Use lsof to find process using the port
+    exec(`lsof -ti tcp:${port}`, (err, stdout, stderr) => {
+      if (err || !stdout.trim()) {
+        console.log(`[wiki-plugin-allyabase] No process found using port ${port}`);
+        resolve(false);
+        return;
+      }
+
+      const pid = parseInt(stdout.trim(), 10);
+      console.log(`[wiki-plugin-allyabase] Found process ${pid} using port ${port}`);
+
+      const killed = killProcessByPid(pid);
+      resolve(killed);
+    });
+  });
+}
+
+// Function to stop PM2 and all managed services
+async function stopPM2() {
+  console.log('[wiki-plugin-allyabase] Stopping PM2 and all services...');
+
+  return new Promise((resolve) => {
+    // Try to stop PM2 gracefully using pm2 kill
+    exec('pm2 kill', (err, stdout, stderr) => {
+      if (err) {
+        console.log(`[wiki-plugin-allyabase] PM2 kill failed (might not be running): ${err.message}`);
+      } else {
+        console.log(`[wiki-plugin-allyabase] PM2 killed successfully`);
+      }
+
+      // Clean up PID file
+      cleanupPidFile();
+      resolve();
+    });
+  });
+}
+
+// Function to clean up orphaned processes from previous run
+async function cleanupOrphanedProcesses() {
+  console.log('[wiki-plugin-allyabase] Checking for orphaned allyabase processes...');
+
+  // Check PID file for PM2 process
+  if (fs.existsSync(PM2_PID_FILE)) {
+    try {
+      const pidString = fs.readFileSync(PM2_PID_FILE, 'utf8').trim();
+      const pid = parseInt(pidString, 10);
+
+      console.log(`[wiki-plugin-allyabase] Found PID file with PID ${pid}`);
+      killProcessByPid(pid);
+
+      // Wait for process to die
+      await new Promise(resolve => setTimeout(resolve, 2500));
+
+      // Clean up PID file
+      fs.unlinkSync(PM2_PID_FILE);
+      console.log(`[wiki-plugin-allyabase] Cleaned up PID file`);
+    } catch (err) {
+      console.error(`[wiki-plugin-allyabase] Error reading PID file:`, err.message);
+    }
+  }
+
+  // Stop PM2 if it's running (cleans up all managed services)
+  await stopPM2();
+
+  // Fallback: kill any processes using our ports
+  console.log('[wiki-plugin-allyabase] Cleaning up any processes on service ports...');
+  for (const [service, port] of Object.entries(SERVICE_PORTS)) {
+    await killProcessByPort(port);
+  }
+
+  // Extra wait to ensure everything is dead
+  await new Promise(resolve => setTimeout(resolve, 2000));
+  console.log('[wiki-plugin-allyabase] Cleanup complete');
+}
+
+// Function to write PID file
+function writePidFile(pid) {
+  try {
+    fs.writeFileSync(PM2_PID_FILE, pid.toString(), 'utf8');
+    console.log(`[wiki-plugin-allyabase] Wrote PID ${pid} to ${PM2_PID_FILE}`);
+  } catch (err) {
+    console.error(`[wiki-plugin-allyabase] Error writing PID file:`, err.message);
+  }
+}
+
+// Function to clean up PID file
+function cleanupPidFile() {
+  try {
+    if (fs.existsSync(PM2_PID_FILE)) {
+      fs.unlinkSync(PM2_PID_FILE);
+      console.log(`[wiki-plugin-allyabase] Cleaned up PID file`);
+    }
+  } catch (err) {
+    console.error(`[wiki-plugin-allyabase] Error cleaning up PID file:`, err.message);
+  }
+}
+
+// Function to gracefully shutdown allyabase
+async function shutdownAllyabase() {
+  console.log('[wiki-plugin-allyabase] Shutting down allyabase services...');
+
+  if (allyabaseProcess && !allyabaseProcess.killed) {
+    console.log(`[wiki-plugin-allyabase] Killing allyabase process ${allyabaseProcess.pid}...`);
+
+    try {
+      allyabaseProcess.kill('SIGTERM');
+
+      // Force kill after timeout
+      setTimeout(() => {
+        if (allyabaseProcess && !allyabaseProcess.killed) {
+          console.log(`[wiki-plugin-allyabase] Force killing allyabase process...`);
+          allyabaseProcess.kill('SIGKILL');
+        }
+      }, 2000);
+    } catch (err) {
+      console.error(`[wiki-plugin-allyabase] Error killing allyabase:`, err.message);
+    }
+  }
+
+  // Stop PM2
+  await stopPM2();
+  cleanupPidFile();
 }
 
 // Function to check if a port is responding
@@ -111,6 +272,11 @@ async function healthcheck() {
 
 async function startServer(params) {
   const app = params.app;
+
+  console.log('🔗 wiki-plugin-allyabase starting...');
+
+  // Clean up any orphaned allyabase/PM2 processes from previous run
+  await cleanupOrphanedProcesses();
 
   // Owner middleware to protect state-changing endpoints
   const owner = function (req, res, next) {
@@ -476,25 +642,50 @@ async function startServer(params) {
       console.log('Timestamp:', new Date().toISOString());
       console.log('-'.repeat(80));
 
-      // Launch the setup script with spawn for better output streaming
-      const { spawn } = require('child_process');
-      const setupProcess = spawn('bash', [scriptPath], {
-        stdio: 'inherit', // This will pipe stdout/stderr directly to the parent process
-        env: process.env
+      // Launch the setup script with spawn
+      allyabaseProcess = spawn('bash', [scriptPath], {
+        stdio: ['ignore', 'pipe', 'pipe'], // Don't inherit stdio, capture it
+        env: process.env,
+        detached: false // Keep as child of this process
       });
 
-      setupProcess.on('error', (error) => {
-        console.error('❌ Error spawning allyabase process:', error);
+      // Write PID file immediately after spawning
+      writePidFile(allyabaseProcess.pid);
+
+      // Log stdout
+      allyabaseProcess.stdout.on('data', (data) => {
+        const lines = data.toString().split('\n').filter(line => line.trim());
+        lines.forEach(line => {
+          console.log(`[allyabase:${allyabaseProcess.pid}] ${line}`);
+        });
       });
 
-      setupProcess.on('exit', (code, signal) => {
+      // Log stderr
+      allyabaseProcess.stderr.on('data', (data) => {
+        console.error(`[allyabase:${allyabaseProcess.pid}] ERROR: ${data.toString().trim()}`);
+      });
+
+      // Handle process exit
+      allyabaseProcess.on('exit', (code, signal) => {
         console.log('-'.repeat(80));
         if (code === 0) {
           console.log('✅ Allyabase setup completed successfully');
-        } else {
-          console.log(`⚠️  Allyabase setup exited with code: ${code}, signal: ${signal}`);
+        } else if (code) {
+          console.log(`⚠️  Allyabase setup exited with code: ${code}`);
+        } else if (signal) {
+          console.log(`⚠️  Allyabase setup killed by signal: ${signal}`);
         }
         console.log('='.repeat(80));
+
+        // Clean up PID file when process exits
+        cleanupPidFile();
+        allyabaseProcess = null;
+      });
+
+      allyabaseProcess.on('error', (error) => {
+        console.error('❌ Error spawning allyabase process:', error);
+        cleanupPidFile();
+        allyabaseProcess = null;
       });
 
       baseStatus.lastLaunch = new Date().toISOString();
@@ -503,7 +694,8 @@ async function startServer(params) {
         success: true,
         message: 'Allyabase launch initiated',
         timestamp: baseStatus.lastLaunch,
-        scriptPath: scriptPath
+        scriptPath: scriptPath,
+        pid: allyabaseProcess.pid
       });
     } catch (err) {
       console.error('❌ Error launching allyabase:', err);
@@ -829,6 +1021,44 @@ async function startServer(params) {
 
   // Add deployment routes
   deployment.addRoutes(params);
+
+  console.log('✅ wiki-plugin-allyabase ready!');
+
+  // Set up shutdown hooks to clean up allyabase/PM2 processes
+  let isShuttingDown = false;
+
+  const handleShutdown = async (signal) => {
+    if (isShuttingDown) {
+      return; // Already shutting down
+    }
+    isShuttingDown = true;
+
+    console.log(`[wiki-plugin-allyabase] Received ${signal}, shutting down...`);
+    await shutdownAllyabase();
+
+    // Give it a moment to clean up
+    setTimeout(() => {
+      console.log('[wiki-plugin-allyabase] Shutdown complete');
+      // Don't call process.exit() here - let the parent process handle that
+    }, 3000);
+  };
+
+  // Register shutdown handlers (only once per process)
+  if (!process.allyabaseShutdownRegistered) {
+    process.allyabaseShutdownRegistered = true;
+
+    process.on('SIGINT', () => handleShutdown('SIGINT'));
+    process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+    process.on('exit', () => {
+      if (!isShuttingDown) {
+        // Synchronous cleanup on exit
+        console.log('[wiki-plugin-allyabase] Process exiting, cleaning up...');
+        cleanupPidFile();
+      }
+    });
+
+    console.log('[wiki-plugin-allyabase] Shutdown handlers registered');
+  }
 }
 
 module.exports = { startServer };

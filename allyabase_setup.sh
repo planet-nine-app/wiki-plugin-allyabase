@@ -112,11 +112,11 @@ setup_ecosystem() {
     declare -A service_ports=(
         [julia]=3000
         [continuebee]=2999
-        [fount]=3002
+        [fount]=3006
         [bdo]=3003
         [joan]=3004
         [addie]=3005
-        [pref]=3006
+        [pref]=3002
         [dolores]=3007
         [prof]=3008
         [covenant]=3011
@@ -168,9 +168,22 @@ main() {
     setup_ecosystem
 
     # Start with pm2 daemon (allows pm2 logs, pm2 status, etc.)
+    echo "Starting PM2 with ecosystem config..."
     ./node_modules/.bin/pm2 start ecosystem.config.js
 
-    # Keep the script running so services stay up
-    # This allows the wiki plugin to keep the process alive
-    ./node_modules/.bin/pm2 logs
+    # Wait a moment for services to start
+    echo "Waiting for services to initialize..."
+    sleep 5
+
+    # Show PM2 status
+    ./node_modules/.bin/pm2 status
+
+    echo "✅ Allyabase services launched successfully"
+    echo "Services are running in PM2 daemon mode"
+    echo "Use 'pm2 status' to check service status"
+    echo "Use 'pm2 logs' to view logs"
+
+    # Don't block - exit cleanly so wiki plugin can track the setup script's PID
+    # PM2 daemon will keep services running in the background
+    exit 0
 }; main
