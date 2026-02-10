@@ -139,6 +139,128 @@ function emit($item, item) {
     console.log('[allyabase] Fork detected from:', forkInfo);
   }
 
+  // Add configuration section
+  const configContainer = document.createElement('div');
+  configContainer.style.padding = '10px';
+  configContainer.style.marginBottom = '15px';
+  configContainer.style.backgroundColor = '#f0f8ff';
+  configContainer.style.borderRadius = '5px';
+  configContainer.style.border = '1px solid #cce5ff';
+
+  const configTitle = document.createElement('div');
+  configTitle.style.fontWeight = 'bold';
+  configTitle.style.marginBottom = '10px';
+  configTitle.textContent = '⚙️ Configuration';
+  configContainer.appendChild(configTitle);
+
+  // Location Emoji Input
+  const locationLabel = document.createElement('div');
+  locationLabel.style.fontSize = '12px';
+  locationLabel.style.marginBottom = '4px';
+  locationLabel.textContent = 'Location Emoji (3 emoji):';
+  configContainer.appendChild(locationLabel);
+
+  const locationInput = document.createElement('input');
+  locationInput.type = 'text';
+  locationInput.id = 'location-emoji-input';
+  locationInput.style.width = '200px';
+  locationInput.style.padding = '5px';
+  locationInput.style.fontSize = '16px';
+  locationInput.style.marginBottom = '10px';
+  locationInput.placeholder = 'e.g., 🔥💎🌟';
+  configContainer.appendChild(locationInput);
+
+  // Federation Emoji Input
+  const federationLabel = document.createElement('div');
+  federationLabel.style.fontSize = '12px';
+  federationLabel.style.marginBottom = '4px';
+  federationLabel.textContent = 'Federation Emoji (1 emoji):';
+  configContainer.appendChild(federationLabel);
+
+  const federationInput = document.createElement('input');
+  federationInput.type = 'text';
+  federationInput.id = 'federation-emoji-input';
+  federationInput.style.width = '200px';
+  federationInput.style.padding = '5px';
+  federationInput.style.fontSize = '16px';
+  federationInput.style.marginBottom = '10px';
+  federationInput.placeholder = 'e.g., 💚';
+  federationInput.value = '💚';
+  configContainer.appendChild(federationInput);
+
+  // Save button
+  const saveConfigBtn = document.createElement('button');
+  saveConfigBtn.textContent = 'Save Configuration';
+  saveConfigBtn.style.padding = '8px 15px';
+  saveConfigBtn.style.fontSize = '12px';
+  saveConfigBtn.style.cursor = 'pointer';
+  saveConfigBtn.style.marginTop = '5px';
+  saveConfigBtn.style.backgroundColor = '#4CAF50';
+  saveConfigBtn.style.color = 'white';
+  saveConfigBtn.style.border = 'none';
+  saveConfigBtn.style.borderRadius = '4px';
+  configContainer.appendChild(saveConfigBtn);
+
+  // Config status message
+  const configStatus = document.createElement('div');
+  configStatus.id = 'config-status';
+  configStatus.style.fontSize = '11px';
+  configStatus.style.marginTop = '8px';
+  configStatus.style.minHeight = '16px';
+  configContainer.appendChild(configStatus);
+
+  container.appendChild(configContainer);
+
+  // Load current configuration
+  async function loadConfig() {
+    try {
+      const response = await get('/plugin/allyabase/config');
+      const data = await response.json();
+      if (data.success && data.config) {
+        locationInput.value = data.config.locationEmoji || '';
+        federationInput.value = data.config.federationEmoji || '💚';
+      }
+    } catch (err) {
+      console.error('[allyabase] Error loading config:', err);
+    }
+  }
+
+  // Save configuration
+  saveConfigBtn.addEventListener('click', async () => {
+    try {
+      configStatus.textContent = 'Saving...';
+      configStatus.style.color = '#666';
+
+      const response = await post('/plugin/allyabase/config', {
+        locationEmoji: locationInput.value.trim(),
+        federationEmoji: federationInput.value.trim() || '💚'
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        configStatus.textContent = '✓ Configuration saved successfully!';
+        configStatus.style.color = 'green';
+        // Reload base emoji display
+        loadBaseEmoji();
+      } else {
+        configStatus.textContent = `✗ Error: ${result.error}`;
+        configStatus.style.color = 'red';
+      }
+
+      setTimeout(() => {
+        configStatus.textContent = '';
+      }, 3000);
+    } catch (err) {
+      console.error('[allyabase] Error saving config:', err);
+      configStatus.textContent = `✗ Error: ${err.message}`;
+      configStatus.style.color = 'red';
+    }
+  });
+
+  // Load config on initialization
+  loadConfig();
+
   // Add base emoji identifier section
   const baseEmojiContainer = document.createElement('div');
   baseEmojiContainer.style.padding = '10px';

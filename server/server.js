@@ -29,6 +29,9 @@ const SERVICE_PORTS = {
 // PID file for tracking PM2 process
 const PM2_PID_FILE = path.join(__dirname, 'allyabase-pm2.pid');
 
+// Plugin configuration file (stores locationEmoji, federationEmoji, etc.)
+const CONFIG_FILE = path.join(__dirname, 'plugin-config.json');
+
 let baseStatus = {
   running: false,
   services: {},
@@ -37,7 +40,38 @@ let baseStatus = {
 
 let allyabaseProcess = null;
 
-// Function to load wiki's owner.json for keypair and location emoji
+// Load plugin configuration (locationEmoji, federationEmoji, etc.)
+function loadPluginConfig() {
+  try {
+    if (fs.existsSync(CONFIG_FILE)) {
+      return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    }
+    // Return defaults if no config file exists
+    return {
+      locationEmoji: null,
+      federationEmoji: '💚'
+    };
+  } catch (err) {
+    console.error('[wiki-plugin-allyabase] Error loading plugin config:', err);
+    return {
+      locationEmoji: null,
+      federationEmoji: '💚'
+    };
+  }
+}
+
+// Save plugin configuration
+function savePluginConfig(config) {
+  try {
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf8');
+    return true;
+  } catch (err) {
+    console.error('[wiki-plugin-allyabase] Error saving plugin config:', err);
+    return false;
+  }
+}
+
+// Function to load wiki's sessionless keys from owner.json (authentication only)
 function loadWikiKeypair() {
   try {
     const ownerPath = path.join(process.env.HOME || '/root', '.wiki/status/owner.json');
@@ -46,9 +80,7 @@ function loadWikiKeypair() {
       if (ownerData.sessionlessKeys) {
         return {
           pubKey: ownerData.sessionlessKeys.pubKey,
-          privateKey: ownerData.sessionlessKeys.privateKey,
-          locationEmoji: ownerData.locationEmoji,
-          federationEmoji: ownerData.federationEmoji
+          privateKey: ownerData.sessionlessKeys.privateKey
         };
       }
     }
@@ -521,8 +553,8 @@ async function startServer(params) {
       if (targetWikiUrls && targetWikiUrls.length > 0) {
         // This is a cross-wiki request - try all registered URLs
         const currentWikiUrl = `http://localhost:${req.socket.localPort}`;
-        const wikiInfo = loadWikiKeypair();
-        const thisWikiLocationEmoji = wikiInfo ? wikiInfo.locationEmoji : null;
+        const config = loadPluginConfig();
+        const thisWikiLocationEmoji = config.locationEmoji;
 
         console.log('[BDO EMOJI] Cross-wiki request detected');
         console.log('[BDO EMOJI] Target wikis (${targetWikiUrls.length}): ${targetWikiUrls.join(', ')}');
@@ -751,58 +783,122 @@ async function startServer(params) {
     res.send(baseStatus);
   });
 
-  // Endpoint to get wiki's base emoji identifier
+  // Endpoint to get wiki's base emoji identifier (from plugin config)
   app.get('/plugin/allyabase/base-emoji', function(req, res) {
     try {
-      const ownerPath = path.join(process.env.HOME || '/root', '.wiki/status/owner.json');
-      if (fs.existsSync(ownerPath)) {
-        const ownerData = JSON.parse(fs.readFileSync(ownerPath, 'utf8'));
+      const config = loadPluginConfig();
+      const keypair = loadWikiKeypair();
 
-        const response = {
-          federationEmoji: ownerData.federationEmoji || '💚',
-          locationEmoji: ownerData.locationEmoji || null,
-          baseEmoji: (ownerData.federationEmoji || '💚') + (ownerData.locationEmoji || ''),
-          warnings: []
-        };
+      const response = {
+        federationEmoji: config.federationEmoji || '💚',
+        locationEmoji: config.locationEmoji || null,
+        baseEmoji: (config.federationEmoji || '💚') + (config.locationEmoji || ''),
+        warnings: []
+      };
 
-        // Validation warnings
-        if (!ownerData.locationEmoji) {
-          response.warnings.push({
-            severity: 'error',
-            message: 'Missing locationEmoji in owner.json',
-            fix: 'Add "locationEmoji": "🔥💎🌟" (3 emoji) to your owner.json'
-          });
-        } else if (!ownerData.federationEmoji) {
-          response.warnings.push({
-            severity: 'warning',
-            message: 'Missing federationEmoji in owner.json, using default 💚',
-            fix: 'Add "federationEmoji": "💚" to your owner.json'
+      // Validation warnings
+      if (!config.locationEmoji) {
+        response.warnings.push({
+          severity: 'error',
+          message: 'Location emoji not configured',
+          fix: 'Set your 3-emoji location identifier in the plugin settings'
+        });
+      }
+
+      if (!keypair || !keypair.pubKey) {
+        response.warnings.push({
+          severity: 'error',
+          message: 'Missing sessionless keys in owner.json',
+          fix: 'BDO operations will fail without sessionless keys in ~/.wiki/status/owner.json'
+        });
+      }
+
+      res.send(response);
+    } catch (err) {
+      console.error('Error reading base emoji config:', err);
+      res.status(500).send({
+        error: 'Failed to load base emoji',
+        message: err.message
+      });
+    }
+  });
+
+  // Endpoint to get plugin configuration
+  app.get('/plugin/allyabase/config', function(req, res) {
+    try {
+      const config = loadPluginConfig();
+      res.send({
+        success: true,
+        config: config
+      });
+    } catch (err) {
+      console.error('Error loading plugin config:', err);
+      res.status(500).send({
+        success: false,
+        error: 'Failed to load configuration',
+        message: err.message
+      });
+    }
+  });
+
+  // Endpoint to save plugin configuration (requires owner auth)
+  app.post('/plugin/allyabase/config', owner, function(req, res) {
+    try {
+      const { locationEmoji, federationEmoji } = req.body;
+
+      // Validate locationEmoji (should be exactly 3 emoji)
+      if (locationEmoji) {
+        const emojiRegex = /[\u{1F1E6}-\u{1F1FF}]{2}|(?:[\u{1F3F4}\u{1F3F3}][\u{FE0F}]?(?:\u{200D}[\u{2620}\u{2695}\u{2696}\u{2708}\u{1F308}][\u{FE0F}]?)?)|(?:\p{Emoji_Presentation}|\p{Emoji}\uFE0F)(?:\u{200D}(?:\p{Emoji_Presentation}|\p{Emoji}\uFE0F))*/gu;
+        const emojis = locationEmoji.match(emojiRegex) || [];
+
+        if (emojis.length !== 3) {
+          return res.status(400).send({
+            success: false,
+            error: 'Location emoji must be exactly 3 emoji characters',
+            got: emojis.length
           });
         }
+      }
 
-        if (!ownerData.sessionlessKeys) {
-          response.warnings.push({
-            severity: 'error',
-            message: 'Missing sessionlessKeys in owner.json',
-            fix: 'BDO operations will fail without sessionless keys'
+      // Validate federationEmoji (should be exactly 1 emoji)
+      if (federationEmoji) {
+        const emojiRegex = /[\u{1F1E6}-\u{1F1FF}]{2}|(?:[\u{1F3F4}\u{1F3F3}][\u{FE0F}]?(?:\u{200D}[\u{2620}\u{2695}\u{2696}\u{2708}\u{1F308}][\u{FE0F}]?)?)|(?:\p{Emoji_Presentation}|\p{Emoji}\uFE0F)(?:\u{200D}(?:\p{Emoji_Presentation}|\p{Emoji}\uFE0F))*/gu;
+        const emojis = federationEmoji.match(emojiRegex) || [];
+
+        if (emojis.length !== 1) {
+          return res.status(400).send({
+            success: false,
+            error: 'Federation emoji must be exactly 1 emoji character',
+            got: emojis.length
           });
         }
+      }
 
-        res.send(response);
+      const config = loadPluginConfig();
+
+      // Update config with provided values
+      if (locationEmoji !== undefined) config.locationEmoji = locationEmoji;
+      if (federationEmoji !== undefined) config.federationEmoji = federationEmoji;
+
+      const saved = savePluginConfig(config);
+
+      if (saved) {
+        res.send({
+          success: true,
+          config: config,
+          message: 'Configuration saved successfully'
+        });
       } else {
-        res.status(404).send({
-          error: 'Owner configuration not found',
-          warnings: [{
-            severity: 'error',
-            message: 'owner.json file not found',
-            fix: 'Create ~/.wiki/status/owner.json with locationEmoji and sessionlessKeys'
-          }]
+        res.status(500).send({
+          success: false,
+          error: 'Failed to save configuration'
         });
       }
     } catch (err) {
-      console.error('Error reading owner.json:', err);
+      console.error('Error saving plugin config:', err);
       res.status(500).send({
-        error: 'Failed to load base emoji',
+        success: false,
+        error: 'Failed to save configuration',
         message: err.message
       });
     }
