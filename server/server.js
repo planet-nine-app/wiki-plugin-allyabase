@@ -63,6 +63,18 @@ function loadWikiKeypair() {
 // Function to kill process by PID
 function killProcessByPid(pid) {
   try {
+    // CRITICAL: Never kill PID 1 in Docker containers - it's the main container process
+    if (pid === 1) {
+      console.log(`[wiki-plugin-allyabase] ⚠️  Skipping PID 1 (init process) - this is likely the wiki server itself in Docker`);
+      return false;
+    }
+
+    // Also don't kill our own process
+    if (pid === process.pid) {
+      console.log(`[wiki-plugin-allyabase] ⚠️  Skipping PID ${pid} (this is us!)`);
+      return false;
+    }
+
     console.log(`[wiki-plugin-allyabase] Attempting to kill process ${pid}...`);
     process.kill(pid, 'SIGTERM');
 
@@ -156,7 +168,18 @@ async function cleanupOrphanedProcesses() {
   // Stop PM2 if it's running (cleans up all managed services)
   await stopPM2();
 
-  // Fallback: kill any processes using our ports
+  // Detect if we're in a Docker container
+  // In Docker, services run in separate containers, so port cleanup is unnecessary and dangerous
+  const isDocker = fs.existsSync('/.dockerenv') || fs.existsSync('/run/.containerenv');
+
+  if (isDocker) {
+    console.log('[wiki-plugin-allyabase] 🐳 Detected Docker environment - skipping port cleanup');
+    console.log('[wiki-plugin-allyabase] In Docker, services should run in separate containers, not as processes on ports');
+    console.log('[wiki-plugin-allyabase] Cleanup complete (Docker mode)');
+    return;
+  }
+
+  // Fallback: kill any processes using our ports (only in non-Docker environments)
   console.log('[wiki-plugin-allyabase] Cleaning up any processes on service ports...');
   for (const [service, port] of Object.entries(SERVICE_PORTS)) {
     await killProcessByPort(port);
@@ -288,7 +311,8 @@ async function startServer(params) {
 
   // CORS middleware for federation endpoints
   // Allows cross-origin requests from other federated wikis
-  app.use('/plugin/allyabase/federation/*', function(req, res, next) {
+  // Use regex to match all federation paths (Express doesn't support * wildcard in newer versions)
+  app.use(/^\/plugin\/allyabase\/federation\/.*/, function(req, res, next) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -606,7 +630,8 @@ async function startServer(params) {
   // Create proxy routes for each service
   Object.entries(SERVICE_PORTS).forEach(([service, port]) => {
     // Proxy all methods (GET, POST, PUT, DELETE, etc.)
-    app.all(`/plugin/allyabase/${service}/*`, function(req, res) {
+    // Use regex pattern instead of wildcard to avoid PathError in newer path-to-regexp
+    app.all(new RegExp(`^\\/plugin\\/allyabase\\/${service}\\/.*`), function(req, res) {
       const targetPath = req.url.replace(`/plugin/allyabase/${service}`, '');
       console.log(`[PROXY] ${req.method} /plugin/allyabase/${service}${targetPath} -> http://localhost:${port}${targetPath}`);
       console.log(`[PROXY] Headers:`, JSON.stringify(req.headers, null, 2));
