@@ -153,24 +153,28 @@ function killProcessByPort(port) {
   });
 }
 
-// Function to stop PM2-managed allyabase services (not the daemon itself,
-// since wiki may also be running under PM2)
+// Function to stop PM2-managed allyabase services by name only.
+// NEVER use "pm2 stop all" — that would kill wiki itself if it's running under PM2.
 async function stopPM2() {
   console.log('[wiki-plugin-allyabase] Stopping allyabase services...');
 
-  return new Promise((resolve) => {
-    exec('pm2 stop all', (err, stdout, stderr) => {
-      if (err) {
-        console.log(`[wiki-plugin-allyabase] pm2 stop all failed (might not be running): ${err.message}`);
-      } else {
-        console.log(`[wiki-plugin-allyabase] Allyabase services stopped`);
-      }
+  const serviceNames = Object.keys(SERVICE_PORTS);
 
-      // Clean up PID file
-      cleanupPidFile();
-      resolve();
-    });
-  });
+  await Promise.all(serviceNames.map(name =>
+    new Promise((resolve) => {
+      exec(`pm2 stop ${name}`, (err) => {
+        if (err) {
+          // Service wasn't running under PM2 — that's fine
+        } else {
+          console.log(`[wiki-plugin-allyabase] Stopped PM2 service: ${name}`);
+        }
+        resolve();
+      });
+    })
+  ));
+
+  console.log('[wiki-plugin-allyabase] Allyabase services stopped');
+  cleanupPidFile();
 }
 
 // Function to clean up orphaned processes from previous run
