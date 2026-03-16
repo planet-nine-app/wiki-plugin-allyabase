@@ -768,6 +768,57 @@ async function startServer(params) {
     }
   });
 
+  // Endpoint to update all allyabase services (git pull + npm install + pm2 restart)
+  app.post('/plugin/allyabase/update', owner, async function(req, res) {
+    const services = [
+      'addie', 'aretha', 'bdo', 'continuebee', 'covenant',
+      'dolores', 'fount', 'joan', 'julia', 'minnie', 'pref', 'prof', 'sanora'
+    ];
+    const buildDir = '/var/lib/allyabase';
+    const results = {};
+
+    for (const service of services) {
+      const serviceDir = `${buildDir}/${service}`;
+      try {
+        await new Promise((resolve, reject) => {
+          exec(
+            `git -C "${serviceDir}" pull --ff-only && npm install --prefix "${serviceDir}/src/server/node" --silent`,
+            { timeout: 60000 },
+            (err, stdout, stderr) => {
+              if (err) return reject(err);
+              resolve(stdout);
+            }
+          );
+        });
+        results[service] = 'updated';
+      } catch (err) {
+        results[service] = `error: ${err.message}`;
+        console.error(`[allyabase] update ${service}:`, err.message);
+      }
+    }
+
+    // Restart all services via pm2
+    let restartOutput = '';
+    try {
+      await new Promise((resolve, reject) => {
+        exec(
+          `cd "${buildDir}" && ./node_modules/.bin/pm2 restart ecosystem.config.js`,
+          { timeout: 30000 },
+          (err, stdout) => {
+            if (err) return reject(err);
+            restartOutput = stdout;
+            resolve();
+          }
+        );
+      });
+    } catch (err) {
+      console.error('[allyabase] pm2 restart error:', err.message);
+      restartOutput = `restart error: ${err.message}`;
+    }
+
+    res.send({ success: true, results, restart: restartOutput.trim() });
+  });
+
   // Endpoint to get healthcheck
   app.get('/plugin/allyabase/healthcheck', async function(req, res) {
     try {

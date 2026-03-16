@@ -405,7 +405,20 @@ function emit($item, item) {
   launchButton.style.padding = '10px 20px';
   launchButton.style.marginBottom = '15px';
   launchButton.style.cursor = 'pointer';
+  launchButton.style.marginRight = '10px';
   container.appendChild(launchButton);
+
+  // Add update button
+  const updateButton = document.createElement('button');
+  updateButton.textContent = 'Check for Updates';
+  updateButton.style.padding = '10px 20px';
+  updateButton.style.marginBottom = '15px';
+  updateButton.style.cursor = 'pointer';
+  updateButton.style.backgroundColor = '#0066cc';
+  updateButton.style.color = 'white';
+  updateButton.style.border = 'none';
+  updateButton.style.borderRadius = '4px';
+  container.appendChild(updateButton);
 
   // Add status container
   const statusContainer = document.createElement('div');
@@ -649,6 +662,48 @@ function emit($item, item) {
     } finally {
       launchButton.disabled = false;
       launchButton.textContent = 'Launch a Base';
+    }
+  });
+
+  // Update button click handler
+  updateButton.addEventListener('click', async () => {
+    updateButton.disabled = true;
+    updateButton.textContent = 'Updating...';
+
+    try {
+      const response = await post('/plugin/allyabase/update');
+      const result = await response.json();
+
+      const msg = document.createElement('div');
+      msg.style.marginTop = '10px';
+      msg.style.fontSize = '12px';
+      msg.style.fontFamily = 'monospace';
+
+      if (result.success) {
+        const failed = Object.entries(result.results).filter(([, v]) => v.startsWith('error'));
+        if (failed.length === 0) {
+          msg.style.color = 'green';
+          msg.textContent = '✓ All services updated and restarted.';
+        } else {
+          msg.style.color = 'orange';
+          msg.innerHTML = `⚠️ Updated with errors:<br>` +
+            failed.map(([svc, err]) => `${svc}: ${err}`).join('<br>');
+        }
+      } else {
+        msg.style.color = 'red';
+        msg.textContent = `✗ Update failed: ${result.error}`;
+      }
+
+      container.insertBefore(msg, statusContainer);
+      setTimeout(() => {
+        msg.remove();
+        updateStatus();
+      }, 5000);
+    } catch (err) {
+      console.error('[allyabase] update error:', err);
+    } finally {
+      updateButton.disabled = false;
+      updateButton.textContent = 'Check for Updates';
     }
   });
 
