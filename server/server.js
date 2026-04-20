@@ -6,6 +6,7 @@ const httpProxy = require('http-proxy');
 const fs = require('fs');
 const federationResolver = require('./federation-resolver');
 const deployment = require('./deployment');
+const getPaid = require('./get-paid');
 const bdoModule = require('bdo-js');
 const bdo = bdoModule.default || bdoModule;
 
@@ -1197,6 +1198,9 @@ async function startServer(params) {
 
   // Add deployment routes
   deployment.addRoutes(params);
+
+  // Add get-paid routes (Stripe Connect commission for agora purchases)
+  await getPaid.addRoutes(params);
 
   console.log('✅ wiki-plugin-allyabase ready!');
 
