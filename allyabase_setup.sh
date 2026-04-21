@@ -51,21 +51,8 @@ setup_services() {
         fi
 
         printf '%s\n' "Installing '$service'..."
-        npm install "$service/src/server/node"
+        npm install --prefix "$buildDir/$service/src/server/node"
     done
-
-    # Add logging to BDO service to debug request handling
-    echo "Adding debug logging to BDO service..."
-
-    # Find the PUT /user/create endpoint and add logging at the start
-    sed -i.bak "/app.put.*user\/create/,/^app\./ {
-        /^app\.put/a\\
-console.log('[BDO] Received PUT /user/create request');\
-console.log('[BDO] Headers:', JSON.stringify(req.headers, null, 2));\
-console.log('[BDO] Body:', JSON.stringify(req.body, null, 2));
-    }" bdo/src/server/node/bdo.js
-
-    echo "✓ Added logging to BDO service"
 
 } # setup_services
 
@@ -155,6 +142,8 @@ setup_ecosystem() {
             "    {" \
             "      name: '$service'," \
             "      script: '$buildDir/$service/src/server/node/${service}.js'," \
+            "      node_args: '--max-old-space-size=256'," \
+            "      max_memory_restart: '350M'," \
             "      env: $env" \
             "    }," >>"$ecosystem_config"
     done
@@ -167,12 +156,23 @@ main() {
     setup_services
     setup_ecosystem
 
-    # Start with pm2 daemon (allows pm2 logs, pm2 status, etc.)
-    echo "Starting PM2 with ecosystem config..."
-    ./node_modules/.bin/pm2 start ecosystem.config.js
+    # Start BDO first — all other services register with it on boot
+    echo "Starting BDO first..."
+    ./node_modules/.bin/pm2 start ecosystem.config.js --only bdo
 
-    # Wait a moment for services to start
-    echo "Waiting for services to initialize..."
+    echo "Waiting for BDO to initialize..."
+    sleep 5
+
+    # Start remaining services one at a time to avoid memory spike on small droplets
+    echo "Starting remaining services serially..."
+    for service in "${services[@]}"; do
+        [[ $service == 'bdo' ]] && continue
+        echo "  Starting $service..."
+        ./node_modules/.bin/pm2 start ecosystem.config.js --only "$service"
+        sleep 2
+    done
+
+    echo "Waiting for services to settle..."
     sleep 5
 
     # Show PM2 status

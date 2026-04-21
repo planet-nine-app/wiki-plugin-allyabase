@@ -575,6 +575,9 @@ function emit($item, item) {
 
     try {
       const response = await post('/plugin/allyabase/launch');
+      if (response.status === 401) {
+        throw new Error('You must be logged in as the wiki owner to launch a base');
+      }
       const result = await response.json();
 
       if (result.success) {

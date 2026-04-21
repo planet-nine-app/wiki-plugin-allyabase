@@ -1,6 +1,6 @@
 {
   "name": "wiki-plugin-allyabase",
-  "version": "0.0.12",
+  "version": "0.0.13",
   "description": "Allyabase management plugin for the federated wiki",
   "keywords": [
     "wiki",
